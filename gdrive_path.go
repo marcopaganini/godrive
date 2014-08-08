@@ -1,6 +1,6 @@
 package gdrive_path
 
-// This library requires other the Google Drive Go SDK to run.
+// This library requires the Google Drive SDK to run.
 //
 // For details, check the README.md file with this distribution.
 //
@@ -24,9 +24,13 @@ import (
 	drive "code.google.com/p/google-api-go-client/drive/v2"
 )
 
+// Mime-Type used by Google Drive to indicate a folder
 const MIMETYPE_FOLDER = "application/vnd.google-apps.folder"
+
+// Directory in Google Drive to hold temporary copies of files during inserts
 const DRIVE_TMP_FOLDER = "tmp"
 
+// Main Gdrive struct
 type Gdrive struct {
 	clientId     string
 	clientSecret string
@@ -39,8 +43,7 @@ type Gdrive struct {
 	service   *drive.Service
 }
 
-// Instantiate a new Gdrive object
-
+// NewGdrivePath creates and returns a new *Gdrive Object.
 func NewGdrivePath(clientId string, clientSecret string, code string, scope string, cacheFile string) (*Gdrive, error) {
 	if clientId == "" || clientSecret == "" {
 		return nil, fmt.Errorf("Need both clientId and clientSecret")
@@ -56,8 +59,11 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	return g, err
 }
 
-// Authenticate a Gdrive object
-
+// Authenticates a newly created method (called by NewGdrivePath)
+//
+// This method will authenticate the newly created object using clientId, clientSecret and code.
+// cacheFile is used to store code and only needs to be specified once. This method will return
+// an error code indicating the URL to retrieve the 'code', if needed.
 func (g *Gdrive) authenticate() error {
 	// Set up configuration
 	config := &oauth.Config{
@@ -95,9 +101,12 @@ func (g *Gdrive) authenticate() error {
 	return nil
 }
 
+// Stat receives a path like filename and parses each element in turn, returning
+// the *drive.File object for the last element in the path.
 //
-// Stat: Return a *drive.File object for the path or a nil if path not found
-//
+// Since Google Drive allows more than one object with the same name and Unix
+// filesystems do not, Stat will return a nil *drive.File object if duplicate
+// elements are found anywhere along the path.
 func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	var (
 		children []*drive.ChildReference
@@ -178,8 +187,10 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	return ret, err
 }
 
-// Mkdir:
-
+// Mkdir creates the directory (folder) specified by drivePath. It returns nil if
+// duplicate elements exist anywhere in the path or part of the path is missing or
+// the *drive.File of the newly created directory. If a directory already exists
+// with the same name, this method will return a *drive.File object pointing to it.
 func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	var parentId string
 
@@ -214,8 +225,10 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Move:
-
+// Move will move the object in 'srcPath' (file or directory) to have 'dstDir'
+// as its new parent. The original parentId will be removed (effectively moving the file
+// to another directory). This method returns a *drive.File object pointing to the
+// moved file or nil in case of path problems (duplicate elements, non-existing path, etc)
 func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	// Sanitize Source & Destination
 	srcDir, srcFile, srcPath := splitPath(srcPath)
@@ -272,8 +285,10 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Insert
-
+// Insert a file named 'dstPath' with the contents of 'localFile'. This method will first
+// insert the file under DRIVE_TMP_FOLDER and then move it to its final location. DRIVE_TMP_FOLDER
+// will be automatically created, if needed. The method returns a *drive.File object pointing to
+// the file in its final location, or nil to indicate path related problems.
 func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	// Sanitize
 	dstDir, dstFile, dstPath := splitPath(dstPath)
@@ -324,30 +339,22 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 // accessed struct members available to the caller.
 //
 
+// IsDir returns true if the passed *drive.File object is a directory
 func IsDir(driveFile *drive.File) bool {
 	return (driveFile.MimeType == MIMETYPE_FOLDER)
 }
 
+// CreateDate returns the time.Time representation of the *drive.File object's creation date.
 func CreateDate(driveFile *drive.File) (time.Time, error) {
 	return time.Parse(time.RFC3339, driveFile.CreatedDate)
 }
 
+// ModifiedDate returns the time.Time representation of the *drive.File object's modification date.
 func ModifedDate(driveFile *drive.File) (time.Time, error) {
 	return time.Parse(time.RFC3339, driveFile.ModifiedDate)
 }
 
-// GdriveFilesGet: Returns a *drive.File object for the file identified by ObjectId
-//
-// Arguments:
-// 	fileId: The id of the file
-//
-// Returns:
-// 	drive.Resource
-//  error
-//
-// Note: This call is recursive, and thus expensive when run
-// with a broad query parameter
-
+// GdriveFilesGet Returns a *drive.File object for the object identified by 'fileId'
 func (g *Gdrive) GdriveFilesGet(fileId string) (*drive.File, error) {
 	f, err := g.service.Files.Get(fileId).Do()
 	if err != nil {
@@ -356,18 +363,8 @@ func (g *Gdrive) GdriveFilesGet(fileId string) (*drive.File, error) {
 	return f, nil
 }
 
-// GdriveChildrenList: Returns a slice of *drive.ChilReference containing objects under
-// ParentId which satisfies the passed query.
-//
-// Arguments:
-// 	ParentId
-//  Query
-//
-// Returns:
-// 	drive.Resource
-//  error
-//
-
+// GdriveChildrenList Returns a slice of *drive.ChilReference containing all
+// objects under 'ParentId' which satisfy the 'query' parameter.
 func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.ChildReference, error) {
 	var ret []*drive.ChildReference
 
@@ -391,8 +388,14 @@ func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.Chi
 	return ret, nil
 }
 
-// Insert files into Gdrive
-
+// GdriveFilesInsert inserts a new Object (file/dir) on Google Drive under
+// 'parentId'. The object's contents will come from 'localFile'.  If
+// 'localFile' is not set, an empty object will be created (this is how we
+// create directories). The title of the object will be set to 'title' and will
+// default to the basename of the file if not set. The object's MIME Type will
+// be set to 'mimeType', or automatically detected if mimeType is blank.
+//
+// This method returns a *drive.File object pointing to the file just inserted.
 func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId string, mimeType string) (*drive.File, error) {
 	// Default title to basename of file
 	if title == "" {
@@ -422,8 +425,8 @@ func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId stri
 	return r, nil
 }
 
-// Patch gdrive files
-
+// GdriveFilesPatch adds and/or remove parents to the file specified by 'fileId'. It returns
+// a *drive.File object pointing to the modified file.
 func (g *Gdrive) GdriveFilesPatch(fileId string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
 	driveFile := &drive.File{}
 	p := g.service.Files.Patch(fileId, driveFile)
@@ -440,14 +443,15 @@ func (g *Gdrive) GdriveFilesPatch(fileId string, addParentIds []string, removePa
 	return r, nil
 }
 
-// Move files to the trash
-
+// GdriveFilesTrash moves the file indicated by 'fileId' to the Google Drive Trash.
+// It returns a *drive.File object pointing to the file inside Trash.
 func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
 	return g.service.Files.Trash(fileId).Do()
 }
 
-// Utility functions
-
+// splitPath will take a Unix like pathname, split it on its components, remove empty
+// elements and return the directory, filename and a completely reconstructed path.
+// The leading slash is removed, as well as any trailing slashes.
 func splitPath(pathName string) (string, string, string) {
 	var ret []string
 
