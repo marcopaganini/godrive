@@ -114,6 +114,11 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		err      error
 	)
 
+	// Special case for "/" (root)
+	if drivePath == "/" {
+		return g.GdriveFilesGet("root")
+	}
+
 	// Sanitize
 	dirs, filename, drivePath := splitPath(drivePath)
 	if drivePath == "" {
@@ -185,6 +190,36 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	ret, err := g.GdriveFilesGet(parent)
 	// fmt.Printf("DEBUG returning ret=[%v] err=[%v]\n", ret, err)
 	return ret, err
+}
+
+// Listdir returns a slice of *drive.File objects under 'drivePath'
+// which match 'query' or nil if the path does not exist. If query is
+// not specified, it defaults to 'trashed = false'.
+func (g *Gdrive) Listdir(drivePath string, query string) ([]*drive.File, error) {
+	var ret []*drive.File
+
+	driveDir, err := g.Stat(drivePath)
+	if err != nil || driveDir == nil {
+		return nil, fmt.Errorf("%v", err)
+	}
+
+	if query == "" {
+		query = "trashed = false"
+	}
+	children, err := g.GdriveChildrenList(driveDir.Id, query)
+	if err != nil {
+		return nil, fmt.Errorf("%v", err)
+	}
+
+	for _, child := range children {
+		driveFile, err := g.GdriveFilesGet(child.Id)
+		if err != nil {
+			return nil, fmt.Errorf("%v", err)
+		}
+		ret = append(ret, driveFile)
+	}
+
+	return ret, nil
 }
 
 // Mkdir creates the directory (folder) specified by drivePath. It returns nil if
