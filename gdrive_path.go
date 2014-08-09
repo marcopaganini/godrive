@@ -13,7 +13,6 @@ package gdrive_path
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -313,7 +312,7 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	// Set parents
 	driveFile, err := g.GdriveFilesPatch(srcObj.Id, []string{dstDirObj.Id}, []string{srcParentObj.Id})
 	if err != nil {
-		log.Fatalf("Error moving file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
+		return nil, fmt.Errorf("Error moving file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
 	}
 	// log.Printf("DEBUG: Finished Patching")
 	// log.Printf("DEBUG: Got drivefile after move: %v", driveFile)
@@ -342,7 +341,7 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 
 	tmpFileObj, err := g.Stat(tmpPath)
 	if err != nil {
-		log.Fatalf("Error getting metadata for \"%s\": %v", tmpPath, err)
+		return nil, fmt.Errorf("Error getting metadata for \"%s\": %v", tmpPath, err)
 	}
 	if tmpFileObj != nil {
 		_, err = g.GdriveFilesTrash(tmpFileObj.Id)
