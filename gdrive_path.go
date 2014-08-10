@@ -321,7 +321,7 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	// log.Printf("DEBUG: Finished trash testing")
 
 	// Set parents
-	driveFile, err := g.GdriveFilesPatch(srcObj.Id, "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
+	driveFile, err := g.GdriveFilesPatch(srcObj.Id, "", "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
 	if err != nil {
 		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
 	}
@@ -383,8 +383,30 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	return dstFileObj, nil
 }
 
+// Rename changes the title of the file/dir specified by drivePath to
+// 'newName'. Files and directories are *not* moved and newName is not a path,
+// just a file name! Only the last element in drivePath will actually be
+// changed.
+//
+// Returns a *drive.File pointing to the modified file/dir and an error. If a
+// non-fatal error occurs, *drive.File will be set to nil.
+func (g *Gdrive) Rename(drivePath string, newName string) (*drive.File, error) {
+	driveFile, err := g.Stat(drivePath)
+	if err != nil {
+		return nil, err
+	}
+	if driveFile == nil {
+		return nil, fmt.Errorf("Rename: Unable to fetch metadata for \"%s\"", drivePath)
+	}
+	// Set Date
+	return g.GdriveFilesPatch(driveFile.Id, newName, "", nil, nil)
+}
+
 // SetModifiedDate will set the modification date of the file/directory specified by
-// 'drivePath' to 'modifiedDate'. Returns a *drive.File pointing to the modified file.
+// 'drivePath' to 'modifiedDate'.
+//
+// Returns a *drive.File pointing to the modified file/dir and an error. If a
+// non-fatal error occurs, *drive.File will be set to nil.
 func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*drive.File, error) {
 
 	driveFile, err := g.Stat(drivePath)
@@ -398,7 +420,7 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	rfcDate := modifiedDate.Format(time.RFC3339Nano)
 
 	// Set Date
-	return g.GdriveFilesPatch(driveFile.Id, rfcDate, nil, nil)
+	return g.GdriveFilesPatch(driveFile.Id, "", rfcDate, nil, nil)
 }
 
 //
@@ -497,13 +519,20 @@ func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId stri
 // GdriveFilesPatch patches the file's metadata. The following information about the file
 // can be changed:
 //
+// - Title
 // - modifiedDate
 // - addParentIds
 // - removeParentIds
 //
+// Setting values to a blank string (when of type string) or nil will cause that
+// particular attribute to remain untouched.
+//
 // Returns a *drive.File object pointing to the modified file.
-func (g *Gdrive) GdriveFilesPatch(fileId string, modifiedDate string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
+func (g *Gdrive) GdriveFilesPatch(fileId string, title string, modifiedDate string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
 	driveFile := &drive.File{}
+	if title != "" {
+		driveFile.Title = title
+	}
 	if modifiedDate != "" {
 		driveFile.ModifiedDate = modifiedDate
 	}
