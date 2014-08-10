@@ -45,7 +45,7 @@ type Gdrive struct {
 // NewGdrivePath creates and returns a new *Gdrive Object.
 func NewGdrivePath(clientId string, clientSecret string, code string, scope string, cacheFile string) (*Gdrive, error) {
 	if clientId == "" || clientSecret == "" {
-		return nil, fmt.Errorf("Need both clientId and clientSecret")
+		return nil, fmt.Errorf("NewGdrivePath: Need both clientId and clientSecret")
 	}
 
 	g := &Gdrive{clientId: clientId, clientSecret: clientSecret, code: code, scope: scope, cacheFile: cacheFile}
@@ -85,14 +85,14 @@ func (g *Gdrive) authenticate() error {
 			// Get an authorization code from the data provider.
 			// ("Please ask the user if I can access this resource.")
 			url := config.AuthCodeURL("")
-			return fmt.Errorf("Code missing. To get a new one visit the url below:\n%s", url)
+			return fmt.Errorf("authenticate: Code missing. To get a new one visit the url below:\n%s", url)
 		}
 		// Exchange the authorization code for an access token.
 		// ("Here's the code you gave the user, now give me a token!")
 		// If everything works, the Exchange method will cache the token.
 		token, err = g.transport.Exchange(g.code)
 		if err != nil {
-			return fmt.Errorf("Error exchanging code for token: %v", err)
+			return fmt.Errorf("authenticate: Error exchanging code for token: %v", err)
 		}
 	}
 
@@ -121,7 +121,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	// Sanitize
 	dirs, filename, drivePath := splitPath(drivePath)
 	if drivePath == "" {
-		return nil, fmt.Errorf("Trying to stat blank path")
+		return nil, fmt.Errorf("Stat: Trying to stat blank path")
 	}
 
 	parent := "root"
@@ -149,7 +149,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 			return nil, err
 		}
 		if len(children) != 0 {
-			return nil, fmt.Errorf("Element \"%s\" in path \"%s\" is a file, not a directory", elem, drivePath)
+			return nil, fmt.Errorf("Stat: Element \"%s\" in path \"%s\" is a file, not a directory", elem, drivePath)
 		}
 
 		// Test: One and only one directory
@@ -160,7 +160,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 			return nil, err
 		}
 		if len(children) > 1 {
-			return nil, fmt.Errorf("More than one directory \"%s\" exists in path \"%s\"", elem, drivePath)
+			return nil, fmt.Errorf("Stat: More than one directory named \"%s\" exists in path \"%s\"", elem, drivePath)
 		}
 		parent = children[0].Id
 		// fmt.Printf("DEBUG: Using parent [%s]\n", parent)
@@ -178,7 +178,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 			return nil, err
 		}
 		if len(children) > 1 {
-			return nil, fmt.Errorf("More than one file/directory \"%s\" exists in path \"%s\"", filename, drivePath)
+			return nil, fmt.Errorf("Stat: More than one file/directory named \"%s\" exists in path \"%s\"", filename, drivePath)
 		}
 		parent = children[0].Id
 		// fmt.Printf("DEBUG: Using parent [%s]\n", parent)
@@ -199,7 +199,7 @@ func (g *Gdrive) Listdir(drivePath string, query string) ([]*drive.File, error) 
 
 	driveDir, err := g.Stat(drivePath)
 	if err != nil || driveDir == nil {
-		return nil, fmt.Errorf("%v", err)
+		return nil, err
 	}
 
 	if query == "" {
@@ -207,13 +207,13 @@ func (g *Gdrive) Listdir(drivePath string, query string) ([]*drive.File, error) 
 	}
 	children, err := g.GdriveChildrenList(driveDir.Id, query)
 	if err != nil {
-		return nil, fmt.Errorf("%v", err)
+		return nil, fmt.Errorf("ListDir: Error retrieving ChildrenList for path \"%s\": %v", drivePath, err)
 	}
 
 	for _, child := range children {
 		driveFile, err := g.GdriveFilesGet(child.Id)
 		if err != nil {
-			return nil, fmt.Errorf("%v", err)
+			return nil, fmt.Errorf("ListDir: Error fetching file metadata for path \"%s\": %v", drivePath, err)
 		}
 		ret = append(ret, driveFile)
 	}
@@ -231,13 +231,13 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	// Sanitize
 	pathname, dirname, drivePath := splitPath(drivePath)
 	if drivePath == "" {
-		return nil, fmt.Errorf("Attempting to create a blank directory")
+		return nil, fmt.Errorf("Mkdir: Attempting to create a blank directory")
 	}
 
 	// If the path already exists, returns a *drive.File
 	// struct pointing to it.
 	driveFile, err := g.Stat(drivePath)
-	if err != nil || driveFile != nil {
+	if err != nil && driveFile != nil {
 		return driveFile, err
 	}
 
@@ -269,24 +269,35 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	_, _, dstDir = splitPath(dstDir)
 
 	if srcPath == "" || dstDir == "" {
-		return nil, fmt.Errorf("Move: Source Object and Destination Dir must be set")
+		return nil, fmt.Errorf("Move: Source object and destination dir must be set")
 	}
 
 	// We need the source parentId, destination Id and object Id
 	// fmt.Printf("DEBUG source parent is %s\n", srcDir)
 	srcParentObj, err := g.Stat(srcDir)
-	if err != nil || srcParentObj == nil {
-		return nil, fmt.Errorf("Unable to find id for (parent dir) \"%s\": %v", srcDir, err)
+	if err != nil {
+		return nil, err
 	}
+	if srcParentObj == nil {
+		return nil, fmt.Errorf("Move: Unable to find id for (parent dir) \"%s\"", srcDir)
+	}
+
 	// fmt.Printf("DEBUG source is %s\n", srcPath)
 	srcObj, err := g.Stat(srcPath)
-	if err != nil || srcObj == nil {
-		return nil, fmt.Errorf("Unable to find object id for \"%s\": %v", srcPath, err)
+	if err != nil {
+		return nil, err
 	}
+	if srcObj == nil {
+		return nil, fmt.Errorf("Move: Unable to find object id for \"%s\"", srcPath)
+	}
+
 	// fmt.Printf("DEBUG dest is %s\n", dstDir)
 	dstDirObj, err := g.Stat(dstDir)
-	if err != nil || dstDirObj == nil {
-		return nil, fmt.Errorf("Unable to find object id for destination dir \"%s\": %v", dstDir, err)
+	if err != nil {
+		return nil, err
+	}
+	if dstDirObj == nil {
+		return nil, fmt.Errorf("Move: Unable to find object id for destination dir \"%s\"", dstDir)
 	}
 
 	// If we have the same filename inside the destination directory:
@@ -295,16 +306,16 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	dstPath := dstDir + "/" + srcFile
 	dstFileObj, err := g.Stat(dstPath)
 	if err != nil {
-		return nil, fmt.Errorf("Error fetching metadata for \"%s\": %v", dstPath, err)
+		return nil, err
 	}
 	// log.Printf("DEBUG: Got metadata for file [%s]", dstPath)
 	if dstFileObj != nil {
 		if IsDir(dstFileObj) {
-			return nil, fmt.Errorf("Cannot move \"%s\" to \"%s\" (latter is a directory)", srcPath, dstDir)
+			return nil, fmt.Errorf("Move: Destination \"%s\" is not a directory", dstDir)
 		}
 		_, err = g.GdriveFilesTrash(dstFileObj.Id)
 		if err != nil {
-			return nil, fmt.Errorf("Error removing \"%s\": %v", dstPath, err)
+			return nil, fmt.Errorf("Move: Error removing temporary file \"%s\": %v", dstPath, err)
 		}
 	}
 	// log.Printf("DEBUG: Finished trash testing")
@@ -312,7 +323,7 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	// Set parents
 	driveFile, err := g.GdriveFilesPatch(srcObj.Id, []string{dstDirObj.Id}, []string{srcParentObj.Id})
 	if err != nil {
-		return nil, fmt.Errorf("Error moving file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
+		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
 	}
 	// log.Printf("DEBUG: Finished Patching")
 	// log.Printf("DEBUG: Got drivefile after move: %v", driveFile)
@@ -327,13 +338,16 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	// Sanitize
 	dstDir, dstFile, dstPath := splitPath(dstPath)
 	if dstPath == "" {
-		return nil, fmt.Errorf("Attempting to upload to a blank path")
+		return nil, fmt.Errorf("Insert: empty destination path")
 	}
 
 	// We always upload to DRIVE_TMP_FOLDER so it must always exist
 	tmpDirObj, err := g.Mkdir(DRIVE_TMP_FOLDER)
-	if err != nil || tmpDirObj == nil {
-		return nil, fmt.Errorf("Unable to create temporary folder \"%s\"", DRIVE_TMP_FOLDER)
+	if err != nil {
+		return nil, err
+	}
+	if tmpDirObj == nil {
+		return nil, fmt.Errorf("Insert: Unable to create temporary folder \"%s\"", DRIVE_TMP_FOLDER)
 	}
 
 	// Delete temp file if it already exists (file or directory)
@@ -341,26 +355,29 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 
 	tmpFileObj, err := g.Stat(tmpPath)
 	if err != nil {
-		return nil, fmt.Errorf("Error getting metadata for \"%s\": %v", tmpPath, err)
+		return nil, err
 	}
 	if tmpFileObj != nil {
 		_, err = g.GdriveFilesTrash(tmpFileObj.Id)
 		if err != nil {
-			return nil, fmt.Errorf("Error removing temporary file \"%s\": %v", tmpPath, err)
+			return nil, fmt.Errorf("Insert: Error removing existing temporary file \"%s\": %v", tmpPath, err)
 		}
 	}
 
 	// Insert file into tmp dir
 	tmpFileObj, err = g.GdriveFilesInsert(localFile, "", tmpDirObj.Id, "")
 	if err != nil {
-		return nil, fmt.Errorf("Error inserting temporary file \"%s\": %v", tmpPath)
+		return nil, fmt.Errorf("Insert: Error inserting temporary file \"%s\": %v", tmpPath)
 	}
 
 	// Move file to definitive location
 	// log.Printf("DEBUG: now moving %s to %s\n", tmpPath, dstDir)
 	dstFileObj, err := g.Move(tmpPath, dstDir)
-	if err != nil || dstFileObj == nil {
-		return nil, fmt.Errorf("Error moving tmp file \"%s\" to \"%s\": %v", tmpPath, dstPath, err)
+	if err != nil {
+		return nil, err
+	}
+	if dstFileObj == nil {
+		return nil, fmt.Errorf("Insert: Error moving tmp file \"%s\" to \"%s\"", tmpPath, dstPath)
 	}
 
 	return dstFileObj, nil
@@ -392,7 +409,7 @@ func ModifedDate(driveFile *drive.File) (time.Time, error) {
 func (g *Gdrive) GdriveFilesGet(fileId string) (*drive.File, error) {
 	f, err := g.service.Files.Get(fileId).Do()
 	if err != nil {
-		return nil, fmt.Errorf("Error retrieving File Metadata for fileId \"%s\": %v", fileId, err)
+		return nil, fmt.Errorf("GdriveFilesGet: Error retrieving File Metadata for fileId \"%s\": %v", fileId, err)
 	}
 	return f, nil
 }
@@ -411,7 +428,7 @@ func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.Chi
 		}
 		r, err := c.Do()
 		if err != nil {
-			return nil, fmt.Errorf("Error \"%v\" fetching Id for parent_id \"%s\", query=\"%s\"", err, parentId, query)
+			return nil, fmt.Errorf("GdriveChildrenList: fetching Id for parent_id \"%s\", query=\"%s\": %v", parentId, query, err)
 		}
 		ret = append(ret, r.Items...)
 		pageToken = r.NextPageToken
