@@ -494,8 +494,14 @@ func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId stri
 	return r, nil
 }
 
-// GdriveFilesPatch adds and/or remove parents to the file specified by 'fileId'. It returns
-// a *drive.File object pointing to the modified file.
+// GdriveFilesPatch patches the file's metadata. The following information about the file
+// can be changed:
+//
+// - modifiedDate
+// - addParentIds
+// - removeParentIds
+//
+// Returns a *drive.File object pointing to the modified file.
 func (g *Gdrive) GdriveFilesPatch(fileId string, modifiedDate string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
 	driveFile := &drive.File{}
 	if modifiedDate != "" {
