@@ -383,6 +383,24 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	return dstFileObj, nil
 }
 
+// SetModifiedDate will set the modification date of the file/directory specified by
+// 'drivePath' to 'modifiedDate'. Returns a *drive.File pointing to the modified file.
+func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*drive.File, error) {
+
+	driveFile, err := g.Stat(drivePath)
+	if err != nil {
+		return nil, err
+	}
+	if driveFile == nil {
+		return nil, fmt.Errorf("SetModifiedDate: Unable to fetch metadata for \"%s\"", drivePath)
+	}
+
+	rfcDate := modifiedDate.Format(time.RFC3339Nano)
+
+	// Set Date
+	return g.GdriveFilesPatch(driveFile.Id, rfcDate, nil, nil)
+}
+
 //
 // Helper functions
 //
@@ -397,12 +415,12 @@ func IsDir(driveFile *drive.File) bool {
 
 // CreateDate returns the time.Time representation of the *drive.File object's creation date.
 func CreateDate(driveFile *drive.File) (time.Time, error) {
-	return time.Parse(time.RFC3339, driveFile.CreatedDate)
+	return time.Parse(time.RFC3339Nano, driveFile.CreatedDate)
 }
 
 // ModifiedDate returns the time.Time representation of the *drive.File object's modification date.
 func ModifedDate(driveFile *drive.File) (time.Time, error) {
-	return time.Parse(time.RFC3339, driveFile.ModifiedDate)
+	return time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
 }
 
 // GdriveFilesGet Returns a *drive.File object for the object identified by 'fileId'
