@@ -321,7 +321,7 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 	// log.Printf("DEBUG: Finished trash testing")
 
 	// Set parents
-	driveFile, err := g.GdriveFilesPatch(srcObj.Id, []string{dstDirObj.Id}, []string{srcParentObj.Id})
+	driveFile, err := g.GdriveFilesPatch(srcObj.Id, "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
 	if err != nil {
 		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
 	}
@@ -478,14 +478,20 @@ func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId stri
 
 // GdriveFilesPatch adds and/or remove parents to the file specified by 'fileId'. It returns
 // a *drive.File object pointing to the modified file.
-func (g *Gdrive) GdriveFilesPatch(fileId string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
+func (g *Gdrive) GdriveFilesPatch(fileId string, modifiedDate string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
 	driveFile := &drive.File{}
+	if modifiedDate != "" {
+		driveFile.ModifiedDate = modifiedDate
+	}
 	p := g.service.Files.Patch(fileId, driveFile)
 	if len(addParentIds) > 0 {
 		p.AddParents(strings.Join(addParentIds, ","))
 	}
 	if len(removeParentIds) > 0 {
 		p.RemoveParents(strings.Join(removeParentIds, ","))
+	}
+	if modifiedDate != "" {
+		p.SetModifiedDate(true)
 	}
 	r, err := p.Do()
 	if err != nil {
