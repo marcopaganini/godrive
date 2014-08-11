@@ -13,6 +13,7 @@ package gdrive_path
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"path"
@@ -40,6 +41,9 @@ type Gdrive struct {
 	transport *oauth.Transport
 	client    *http.Client
 	service   *drive.Service
+
+	// Unique Id for this instance
+	gdrive_uid int
 }
 
 // NewGdrivePath creates and returns a new *Gdrive Object.
@@ -55,6 +59,11 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	}
 	g.client = g.transport.Client()
 	g.service, err = drive.New(g.client)
+
+	// Unique Id for this instance
+	rand.Seed(time.Now().UnixNano())
+	g.gdrive_uid = rand.Int()
+
 	return g, err
 }
 
@@ -237,7 +246,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	// If the path already exists, returns a *drive.File
 	// struct pointing to it.
 	driveFile, err := g.Stat(drivePath)
-	if err != nil && driveFile != nil {
+	if err != nil || driveFile != nil {
 		return driveFile, err
 	}
 
@@ -259,21 +268,24 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Move will move the object in 'srcPath' (file or directory) to have 'dstDir'
-// as its new parent. The original parentId will be removed (effectively moving the file
-// to another directory). This method returns a *drive.File object pointing to the
-// moved file or nil in case of path problems (duplicate elements, non-existing path, etc)
-func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
+// Move the object in 'srcPath' (file or directory) to 'dstPath'.  It does that
+// by removing the directory in srcPath from the list of parents of the object,
+// and adding dstPath. The object will be renamed (meaning, it's possible to
+// move and rename in a single operation.) This method does not support
+// attempting to move a file/directory path into an existing directory path,
+// and it will return an error indicating so.
+//
+// Returns: *drive.File, err for the moved object.
+func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	// Sanitize Source & Destination
-	srcDir, srcFile, srcPath := splitPath(srcPath)
-	_, _, dstDir = splitPath(dstDir)
+	srcDir, _, srcPath := splitPath(srcPath)
+	dstDir, dstFile, dstPath := splitPath(dstPath)
 
-	if srcPath == "" || dstDir == "" {
+	if srcPath == "" || dstPath == "" {
 		return nil, fmt.Errorf("Move: Source object and destination dir must be set")
 	}
 
 	// We need the source parentId, destination Id and object Id
-	// fmt.Printf("DEBUG source parent is %s\n", srcDir)
 	srcParentObj, err := g.Stat(srcDir)
 	if err != nil {
 		return nil, err
@@ -282,7 +294,6 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 		return nil, fmt.Errorf("Move: Unable to find id for (parent dir) \"%s\"", srcDir)
 	}
 
-	// fmt.Printf("DEBUG source is %s\n", srcPath)
 	srcObj, err := g.Stat(srcPath)
 	if err != nil {
 		return nil, err
@@ -291,7 +302,6 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 		return nil, fmt.Errorf("Move: Unable to find object id for \"%s\"", srcPath)
 	}
 
-	// fmt.Printf("DEBUG dest is %s\n", dstDir)
 	dstDirObj, err := g.Stat(dstDir)
 	if err != nil {
 		return nil, err
@@ -300,33 +310,29 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 		return nil, fmt.Errorf("Move: Unable to find object id for destination dir \"%s\"", dstDir)
 	}
 
-	// If we have the same filename inside the destination directory:
-	// - If it is a directory, abort the move (we can only overwrite files)
-	// - If it is a file, trash the destination first
-	dstPath := dstDir + "/" + srcFile
+	// If the destination path already exists and it is a directory, we
+	// abort the move with an error. If it exists, but is a file, we remove
+	// it before proceeding (similar to what an overwrite would do.)
+
 	dstFileObj, err := g.Stat(dstPath)
 	if err != nil {
 		return nil, err
 	}
-	// log.Printf("DEBUG: Got metadata for file [%s]", dstPath)
 	if dstFileObj != nil {
 		if IsDir(dstFileObj) {
-			return nil, fmt.Errorf("Move: Destination \"%s\" is not a directory", dstDir)
+			return nil, fmt.Errorf("Move: Destination \"%s\" exists and is a directory", dstPath)
 		}
 		_, err = g.GdriveFilesTrash(dstFileObj.Id)
 		if err != nil {
 			return nil, fmt.Errorf("Move: Error removing temporary file \"%s\": %v", dstPath, err)
 		}
 	}
-	// log.Printf("DEBUG: Finished trash testing")
 
-	// Set parents
-	driveFile, err := g.GdriveFilesPatch(srcObj.Id, "", "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
+	// Set parents and change name if needed
+	driveFile, err := g.GdriveFilesPatch(srcObj.Id, dstFile, "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
 	if err != nil {
-		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstDir, err)
+		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstPath, err)
 	}
-	// log.Printf("DEBUG: Finished Patching")
-	// log.Printf("DEBUG: Got drivefile after move: %v", driveFile)
 	return driveFile, nil
 }
 
@@ -336,7 +342,7 @@ func (g *Gdrive) Move(srcPath string, dstDir string) (*drive.File, error) {
 // the file in its final location, or nil to indicate path related problems.
 func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	// Sanitize
-	dstDir, dstFile, dstPath := splitPath(dstPath)
+	_, dstFile, dstPath := splitPath(dstPath)
 	if dstPath == "" {
 		return nil, fmt.Errorf("Insert: empty destination path")
 	}
@@ -350,9 +356,10 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 		return nil, fmt.Errorf("Insert: Unable to create temporary folder \"%s\"", DRIVE_TMP_FOLDER)
 	}
 
-	// Delete temp file if it already exists (file or directory)
-	tmpPath := DRIVE_TMP_FOLDER + "/" + dstFile
+	tmpFile := fmt.Sprintf("%s.%d", dstFile, g.gdrive_uid)
+	tmpPath := DRIVE_TMP_FOLDER + "/" + tmpFile
 
+	// Delete temp file if it already exists (file or directory)
 	tmpFileObj, err := g.Stat(tmpPath)
 	if err != nil {
 		return nil, err
@@ -364,15 +371,14 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 		}
 	}
 
-	// Insert file into tmp dir
-	tmpFileObj, err = g.GdriveFilesInsert(localFile, "", tmpDirObj.Id, "")
+	// Insert file into tmp dir with the temporary name
+	tmpFileObj, err = g.GdriveFilesInsert(localFile, tmpFile, tmpDirObj.Id, "")
 	if err != nil {
 		return nil, fmt.Errorf("Insert: Error inserting temporary file \"%s\": %v", tmpPath)
 	}
 
 	// Move file to definitive location
-	// log.Printf("DEBUG: now moving %s to %s\n", tmpPath, dstDir)
-	dstFileObj, err := g.Move(tmpPath, dstDir)
+	dstFileObj, err := g.Move(tmpPath, dstPath)
 	if err != nil {
 		return nil, err
 	}
