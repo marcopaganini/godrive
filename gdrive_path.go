@@ -487,6 +487,10 @@ func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.Chi
 //
 // This method returns a *drive.File object pointing to the file just inserted.
 func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId string, mimeType string) (*drive.File, error) {
+	var err error
+	var goFile *os.File
+	var r *drive.File
+
 	// Default title to basename of file
 	if title == "" {
 		title = path.Base(localFile)
@@ -502,13 +506,14 @@ func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId stri
 	}
 	// Only insert file media if localFile is a filename
 	if localFile != "" {
-		goFile, err := os.Open(localFile)
+		goFile, err = os.Open(localFile)
 		if err != nil {
 			return nil, err
 		}
-		g.service.Files.Insert(driveFile).Media(goFile)
+		r, err = g.service.Files.Insert(driveFile).Media(goFile).Do()
+	} else {
+		r, err = g.service.Files.Insert(driveFile).Do()
 	}
-	r, err := g.service.Files.Insert(driveFile).Do()
 	if err != nil {
 		return nil, err
 	}
