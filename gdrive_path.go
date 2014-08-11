@@ -142,18 +142,15 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	//
 	// Note: this is expensive for what it is :(
 
-	// fmt.Printf("====\nDEBUG Stat dirs=[%s], filename=[%s]\n", dirs, filename)
 	for _, elem := range strings.Split(dirs, "/") {
 		// Split on blank strings returns one element
 		if elem == "" {
 			continue
 		}
 
-		// fmt.Printf("DEBUG: Testing elem [%s]\n", elem)
 		// Test: No elements in our directory path are files
 		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType != '%s'", elem, MIMETYPE_FOLDER)
 		children, err = g.GdriveChildrenList(parent, query)
-		// fmt.Printf("DEBUG Stat test file for parent [%s] returned err [%v] children [%v]\n", parent, err, children)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +161,6 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		// Test: One and only one directory
 		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType = '%s'", elem, MIMETYPE_FOLDER)
 		children, err = g.GdriveChildrenList(parent, query)
-		// fmt.Printf("DEBUG Stat test dir for parent [%s] returned err [%v] children [%v]\n", parent, err, children)
 		if err != nil || len(children) == 0 {
 			return nil, err
 		}
@@ -172,7 +168,6 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 			return nil, fmt.Errorf("Stat: More than one directory named \"%s\" exists in path \"%s\"", elem, drivePath)
 		}
 		parent = children[0].Id
-		// fmt.Printf("DEBUG: Using parent [%s]\n", parent)
 	}
 
 	// At this point, the entire path is good. We now check for 'filename'
@@ -182,7 +177,6 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	if filename != "" {
 		query = fmt.Sprintf("title = '%s' and trashed = false", filename)
 		children, err = g.GdriveChildrenList(parent, query)
-		// fmt.Printf("DEBUG Stat test filename for parent [%s] returned err [%v] children [%v]\n", parent, err, children)
 		if err != nil || len(children) == 0 {
 			return nil, err
 		}
@@ -190,13 +184,11 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 			return nil, fmt.Errorf("Stat: More than one file/directory named \"%s\" exists in path \"%s\"", filename, drivePath)
 		}
 		parent = children[0].Id
-		// fmt.Printf("DEBUG: Using parent [%s]\n", parent)
 	}
 
 	// Parent contains the id of the last element
 
 	ret, err := g.GdriveFilesGet(parent)
-	// fmt.Printf("DEBUG returning ret=[%v] err=[%v]\n", ret, err)
 	return ret, err
 }
 
