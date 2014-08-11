@@ -14,6 +14,7 @@ package gdrive_path
 import (
 	"fmt"
 	"math/rand"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -490,9 +491,9 @@ func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId stri
 	if title == "" {
 		title = path.Base(localFile)
 	}
-	driveFile := &drive.File{Title: title}
-	if mimeType != "" {
-		driveFile.MimeType = mimeType
+	driveFile := &drive.File{Title: title, MimeType: mimeType}
+	if mimeType == "" {
+		driveFile.MimeType = mime.TypeByExtension(path.Ext(localFile))
 	}
 	// Set parentId
 	if parentId != "" {
