@@ -31,6 +31,15 @@ const MIMETYPE_FOLDER = "application/vnd.google-apps.folder"
 // Directory in Google Drive to hold temporary copies of files during inserts
 const DRIVE_TMP_FOLDER = "tmp"
 
+// Default cache TTL
+const CACHE_TTL_SECONDS = 60
+
+// Object cache
+type objCache struct {
+	driveFile drive.File
+	timestamp time.Time
+}
+
 // Main Gdrive struct
 type Gdrive struct {
 	clientId     string
@@ -45,6 +54,9 @@ type Gdrive struct {
 
 	// Unique Id for this instance
 	gdrive_uid int
+
+	// Object cache
+	cache map[string]*objCache
 }
 
 // NewGdrivePath creates and returns a new *Gdrive Object.
@@ -65,7 +77,39 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	rand.Seed(time.Now().UnixNano())
 	g.gdrive_uid = rand.Int()
 
+	// Initialize blank cache
+	g.cache = map[string]*objCache{}
+
 	return g, err
+}
+
+// cacheAdd: Add/replace object in the cache using 'drivePath' as a key
+// Returns: nothing
+func (g *Gdrive) cacheAdd(drivePath string, driveFile *drive.File) {
+	obj := &objCache{*driveFile, time.Now()}
+	g.cache[drivePath] = obj
+}
+
+// cacheGet: Retrieves object from the cache using 'drivePath' as a key
+// Returns: *driveFile object or nil if not found or expired
+func (g *Gdrive) cacheGet(drivePath string) *drive.File {
+	obj, ok := g.cache[drivePath]
+	if ok {
+		if time.Now().After(obj.timestamp.Add(CACHE_TTL_SECONDS * time.Second)) {
+			g.cacheDel(drivePath)
+			return nil
+		} else {
+			return &obj.driveFile
+		}
+	}
+
+	return nil
+}
+
+// cacheDel: Removes object from the cache using 'drivePath' as a key.
+// Returns: nothing
+func (g *Gdrive) cacheDel(drivePath string) {
+	delete(g.cache, drivePath)
 }
 
 // Authenticates a newly created method (called by NewGdrivePath)
@@ -122,6 +166,12 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		query    string
 		err      error
 	)
+
+	// Cached?
+	driveFile := g.cacheGet(drivePath)
+	if driveFile != nil {
+		return driveFile, nil
+	}
 
 	// Special case for "/" (root)
 	if drivePath == "/" {
@@ -190,6 +240,9 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	// Parent contains the id of the last element
 
 	ret, err := g.GdriveFilesGet(parent)
+	if err == nil {
+		g.cacheAdd(drivePath, ret)
+	}
 	return ret, err
 }
 
@@ -258,6 +311,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	g.cacheAdd(drivePath, driveFile)
 	return driveFile, nil
 }
 
@@ -326,6 +380,8 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstPath, err)
 	}
+	g.cacheDel(srcPath)
+	g.cacheAdd(dstPath, driveFile)
 	return driveFile, nil
 }
 
@@ -379,26 +435,8 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 		return nil, fmt.Errorf("Insert: Error moving tmp file \"%s\" to \"%s\"", tmpPath, dstPath)
 	}
 
+	// No need to add to cache since Move (above) does it for us.
 	return dstFileObj, nil
-}
-
-// Rename changes the title of the file/dir specified by drivePath to
-// 'newName'. Files and directories are *not* moved and newName is not a path,
-// just a file name! Only the last element in drivePath will actually be
-// changed.
-//
-// Returns a *drive.File pointing to the modified file/dir and an error. If a
-// non-fatal error occurs, *drive.File will be set to nil.
-func (g *Gdrive) Rename(drivePath string, newName string) (*drive.File, error) {
-	driveFile, err := g.Stat(drivePath)
-	if err != nil {
-		return nil, err
-	}
-	if driveFile == nil {
-		return nil, fmt.Errorf("Rename: Unable to fetch metadata for \"%s\"", drivePath)
-	}
-	// Set Date
-	return g.GdriveFilesPatch(driveFile.Id, newName, "", nil, nil)
 }
 
 // SetModifiedDate will set the modification date of the file/directory specified by
@@ -419,7 +457,12 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	rfcDate := modifiedDate.Format(time.RFC3339Nano)
 
 	// Set Date
-	return g.GdriveFilesPatch(driveFile.Id, "", rfcDate, nil, nil)
+	driveFile, err = g.GdriveFilesPatch(driveFile.Id, "", rfcDate, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	g.cacheAdd(drivePath, driveFile)
+	return driveFile, nil
 }
 
 //
