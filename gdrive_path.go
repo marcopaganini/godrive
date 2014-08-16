@@ -497,10 +497,10 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 
 	// Set parents and change name if needed
 	driveFile, err := g.GdriveFilesPatch(srcObj.Id, dstFile, "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
+	g.cacheDel(srcPath)
 	if err != nil {
 		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstPath, err)
 	}
-	g.cacheDel(srcPath)
 	g.cacheAdd(dstPath, driveFile)
 	return driveFile, nil
 }
