@@ -307,10 +307,13 @@ func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
 //	carefully since they do not add/remove objects from the object cache.
 //------------------------------------------------------------------------------
 
-// Insert a file named 'dstPath' with the contents of 'localFile'. This method will first
-// insert the file under DRIVE_TMP_FOLDER and then move it to its final location. DRIVE_TMP_FOLDER
-// will be automatically created, if needed. The method returns a *drive.File object pointing to
-// the file in its final location, or nil to indicate path related problems.
+// Insert a file named 'dstPath' with the contents of 'localFile'. This method
+// will first insert the file under DRIVE_TMP_FOLDER and then move it to its
+// final location. DRIVE_TMP_FOLDER will be automatically created, if needed.
+// The inserted object's modifiedDate will be set to the mtime of localFile.
+//
+// The method returns a *drive.File object pointing to the file in its final
+// location, or nil to indicate path related problems.
 func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	// Sanitize
 	_, dstFile, dstPath := splitPath(dstPath)
@@ -355,6 +358,16 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	}
 	if dstFileObj == nil {
 		return nil, fmt.Errorf("Insert: Error moving tmp file \"%s\" to \"%s\"", tmpPath, dstPath)
+	}
+
+	// Set modified date to localFile's mtime
+	fi, err := os.Stat(localFile)
+	if err != nil {
+		return nil, fmt.Errorf("Insert: Unable to stat localFile \"%s\": %v", localFile, err)
+	}
+	dstFileObj, err = g.SetModifiedDate(dstPath, fi.ModTime())
+	if err != nil {
+		return nil, fmt.Errorf("Insert: Unable to set date of \"%s\": %v", dstPath, err)
 	}
 
 	// No need to add to cache since Move (above) does it for us.
@@ -433,9 +446,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 // Move the object in 'srcPath' (file or directory) to 'dstPath'.  It does that
 // by removing the directory in srcPath from the list of parents of the object,
 // and adding dstPath. The object will be renamed (meaning, it's possible to
-// move and rename in a single operation.) This method does not support
-// attempting to move a file/directory path into an existing directory path,
-// and it will return an error indicating so.
+// move and rename in a single operation.)
 //
 // Returns: *drive.File, err for the moved object.
 func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
@@ -472,22 +483,16 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 		return nil, fmt.Errorf("Move: Unable to find object id for destination dir \"%s\"", dstDir)
 	}
 
-	// If the destination path already exists and it is a directory, we
-	// abort the move with an error. If it exists, but is a file, we remove
-	// it before proceeding (similar to what an overwrite would do.)
-
 	dstFileObj, err := g.Stat(dstPath)
 	if err != nil {
 		return nil, err
 	}
 	if dstFileObj != nil {
-		if IsDir(dstFileObj) {
-			return nil, fmt.Errorf("Move: Destination \"%s\" exists and is a directory", dstPath)
-		}
 		_, err = g.GdriveFilesTrash(dstFileObj.Id)
 		if err != nil {
-			return nil, fmt.Errorf("Move: Error removing temporary file \"%s\": %v", dstPath, err)
+			return nil, fmt.Errorf("Move: Error removing destination file \"%s\": %v", dstPath, err)
 		}
+		g.cacheDel(dstPath)
 	}
 
 	// Set parents and change name if needed
@@ -498,6 +503,52 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	g.cacheDel(srcPath)
 	g.cacheAdd(dstPath, driveFile)
 	return driveFile, nil
+}
+
+// Checks the remote dstPath's modification time and returns true if it is
+// older than the mtime of localFile. It should be used to determine whether a
+// file should be copied or not.
+func (g *Gdrive) RemotePathOutdated(dstPath string, localFile string) (bool, error) {
+	// Sanitize
+	_, _, dstPath = splitPath(dstPath)
+	if dstPath == "" {
+		return false, fmt.Errorf("RemotePathOutdated: empty destination path")
+	}
+
+	fi, err := os.Stat(localFile)
+	if err != nil {
+		return false, fmt.Errorf("RemotePathOutdated: Unable to stat \"%s\": %v", localFile, err)
+	}
+
+	// We can only upload regular files (for now)
+	if !fi.Mode().IsRegular() {
+		return false, fmt.Errorf("RemotePathOutdated: We can only upload regular files (for now) \"%s\"", localFile)
+	}
+
+	dstPathObj, err := g.Stat(dstPath)
+	if err != nil {
+		return false, fmt.Errorf("RemotePathOutdated: Unable to stat remote path \"%s\": %v", dstPath, err)
+	}
+	// No remote copy means outdated
+	if dstPathObj == nil {
+		return true, nil
+	}
+
+	dstPathDate, err := ModifiedDate(dstPathObj)
+	if err != nil {
+		return false, fmt.Errorf("RemotePathOutdated: Unable to retrieve Modified date of \"%s\": %v", dstPath, err)
+	}
+
+	// Comparing with nanoseconds == rounding problems
+	dstPathDate = dstPathDate.Truncate(time.Second)
+	localFileDate := fi.ModTime().Truncate(time.Second)
+
+	// We support copying to directories (they'll be erased by Insert)
+	if localFileDate.After(dstPathDate) {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // SetModifiedDate sets the modification date of the file/directory specified by
@@ -514,6 +565,12 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	if driveFile == nil {
 		return nil, fmt.Errorf("SetModifiedDate: Unable to fetch metadata for \"%s\"", drivePath)
 	}
+
+	// For some reason Gdrive requires the date to contain the nano information
+	// and Format will return a date without nano information if it happens to
+	// be zero. Add 1ns to make sure format will produce a date in the right format.
+	modifiedDate = modifiedDate.Truncate(1 * time.Second)
+	modifiedDate = modifiedDate.Add(1 * time.Nanosecond)
 
 	rfcDate := modifiedDate.Format(time.RFC3339Nano)
 
@@ -636,6 +693,6 @@ func CreateDate(driveFile *drive.File) (time.Time, error) {
 }
 
 // ModifiedDate returns the time.Time representation of the *drive.File object's modification date.
-func ModifedDate(driveFile *drive.File) (time.Time, error) {
+func ModifiedDate(driveFile *drive.File) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
 }
