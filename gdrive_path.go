@@ -13,6 +13,7 @@ package gdrive_path
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"mime"
 	"net/http"
@@ -306,6 +307,68 @@ func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
 //	library will want to use them. Use the primitive calls sparingly and
 //	carefully since they do not add/remove objects from the object cache.
 //------------------------------------------------------------------------------
+
+// Downloads a file named 'srcPath' into 'localFile'. localFile will be overwritten
+// if it exists.
+//
+// The method returns an error type indicating the status of the operation.
+func (g *Gdrive) Download(srcPath string, localFile string) error {
+	// Sanitize
+	_, _, srcPath = splitPath(srcPath)
+	if srcPath == "" {
+		return fmt.Errorf("Download: empty source path")
+	}
+	if localFile == "" {
+		return fmt.Errorf("Download: empty local file")
+	}
+	// If the file exists, it must be a regular file
+	fi, err := os.Stat(localFile)
+	if err != nil {
+		if os.IsExist(err) && !fi.Mode().IsRegular() {
+			return fmt.Errorf("Download: Local file \"%s\" exists and is not a regular file", localFile)
+		}
+	}
+
+	srcFileObj, err := g.Stat(srcPath)
+	if err != nil {
+		return fmt.Errorf("Download: %v", err)
+	}
+	if srcFileObj == nil {
+		return fmt.Errorf("Download: Path \"%s\" does not exist", srcPath)
+	}
+	if srcFileObj.DownloadUrl == "" {
+		return fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
+	}
+
+	// Create a temporary file and write to it, renaming at the end.
+	tmpFile := fmt.Sprintf("%s.%d", localFile, g.gdrive_uid)
+	tmpWriter, err := os.Create(tmpFile)
+	if err != nil {
+		return fmt.Errorf("Download: Error creating \"%s\": %v", tmpFile, err)
+	}
+	defer tmpWriter.Close()
+	defer os.Remove(tmpFile)
+
+	req, err := http.NewRequest("GET", srcFileObj.DownloadUrl, nil)
+	if err != nil {
+		return fmt.Errorf("Download: %v", err)
+	}
+
+	resp, err := g.transport.RoundTrip(req)
+	defer resp.Body.Close()
+
+	nbytes, err := io.Copy(tmpWriter, resp.Body)
+	if err != nil {
+		return fmt.Errorf("Download: %v", err)
+	}
+
+	err = os.Rename(tmpFile, localFile)
+	if err != nil {
+		return fmt.Errorf("Download: %v", err)
+	}
+
+	return nil
+}
 
 // Insert a file named 'dstPath' with the contents of 'localFile'. This method
 // will first insert the file under DRIVE_TMP_FOLDER and then move it to its
