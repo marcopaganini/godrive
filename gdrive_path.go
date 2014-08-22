@@ -357,7 +357,7 @@ func (g *Gdrive) Download(srcPath string, localFile string) error {
 	resp, err := g.transport.RoundTrip(req)
 	defer resp.Body.Close()
 
-	nbytes, err := io.Copy(tmpWriter, resp.Body)
+	_, err = io.Copy(tmpWriter, resp.Body)
 	if err != nil {
 		return fmt.Errorf("Download: %v", err)
 	}
