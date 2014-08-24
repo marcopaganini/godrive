@@ -441,14 +441,13 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 
 	// Delete temp file if it already exists (file or directory)
 	tmpFileObj, err := g.Stat(tmpPath)
-	if err != nil {
-		if IsObjectNotFound(err) {
-			_, err = g.GdriveFilesTrash(tmpFileObj.Id)
-			if err != nil {
-				return nil, fmt.Errorf("Insert: Error removing existing temporary file \"%s\": %v", tmpPath, err)
-			}
-		} else {
-			return nil, err
+	if err != nil && !IsObjectNotFound(err) {
+		return nil, err
+	}
+	if !IsObjectNotFound(err) {
+		_, err = g.GdriveFilesTrash(tmpFileObj.Id)
+		if err != nil {
+			return nil, fmt.Errorf("Insert: Error removing existing temporary file \"%s\": %v", tmpPath, err)
 		}
 	}
 
@@ -526,10 +525,12 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 		return nil, fmt.Errorf("Mkdir: Attempting to create a blank directory")
 	}
 
-	// If the path already exists, returns a *drive.File
-	// struct pointing to it.
+	// If the path already exists, returns a *drive.File pointing to it
 	driveFile, err := g.Stat(drivePath)
-	if err != nil {
+	if err != nil && !IsObjectNotFound(err) {
+		return nil, err
+	}
+	if !IsObjectNotFound(err) {
 		return driveFile, err
 	}
 
