@@ -9,7 +9,7 @@ package gdrive_path
 // author will not be help responsible if it eats all of your
 // files, kicks your cat and runs away with you wife/husband.
 //
-// (C) 2014 by Marco Paganini <paganini@paganini.net>
+// (C) Aug/2014 by Marco Paganini <paganini@paganini.net>
 
 import (
 	"fmt"
@@ -60,6 +60,27 @@ type Gdrive struct {
 	cache map[string]*objCache
 }
 
+//------------------------------------------------------------------------------
+//	Custom error object and methods
+//------------------------------------------------------------------------------
+
+type GdrivePathError struct {
+	ObjectNotFound bool
+	msg            string
+}
+
+func (e *GdrivePathError) Error() string {
+	return e.msg
+}
+
+func IsObjectNotFound(e error) bool {
+	serr, ok := e.(*GdrivePathError)
+	if ok && serr.ObjectNotFound {
+		return true
+	}
+	return false
+}
+
 // NewGdrivePath creates and returns a new *Gdrive Object.
 func NewGdrivePath(clientId string, clientSecret string, code string, scope string, cacheFile string) (*Gdrive, error) {
 	if clientId == "" || clientSecret == "" {
@@ -85,7 +106,7 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 }
 
 //------------------------------------------------------------------------------
-//	Non-exported methods
+//	Private methods
 //------------------------------------------------------------------------------
 
 // cacheAdd: Add/replace object in the cache using 'drivePath' as a key
@@ -119,9 +140,12 @@ func (g *Gdrive) cacheDel(drivePath string) {
 
 // Authenticates a newly created method (called by NewGdrivePath)
 //
-// This method will authenticate the newly created object using clientId, clientSecret and code.
-// cacheFile is used to store code and only needs to be specified once. This method will return
-// an error code indicating the URL to retrieve the 'code', if needed.
+// This method authenticates the newly created object using clientId, clientSecret and code.
+// cacheFile is used to store code and only needs to be specified once.
+//
+// Returns:
+//   error: If the authentication process requires the user to fetch a new code, this method
+//   returns error set with a message containing the URL to be used to fetch a new auth code.
 func (g *Gdrive) authenticate() error {
 	// Set up configuration
 	config := &oauth.Config{
@@ -159,9 +183,32 @@ func (g *Gdrive) authenticate() error {
 	return nil
 }
 
-// splitPath will take a Unix like pathname, split it on its components, remove empty
-// elements and return the directory, filename and a completely reconstructed path.
-// The leading slash is removed, as well as any trailing slashes.
+//------------------------------------------------------------------------------
+//	Static functions
+//------------------------------------------------------------------------------
+
+// CreateDate returns the time.Time representation of the *drive.File object's creation date.
+func CreateDate(driveFile *drive.File) (time.Time, error) {
+	return time.Parse(time.RFC3339Nano, driveFile.CreatedDate)
+}
+
+// IsDir returns true if the passed *drive.File object is a directory
+func IsDir(driveFile *drive.File) bool {
+	return (driveFile.MimeType == MIMETYPE_FOLDER)
+}
+
+// ModifiedDate returns the time.Time representation of the *drive.File object's modification date.
+func ModifiedDate(driveFile *drive.File) (time.Time, error) {
+	return time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
+}
+
+// splitPath takes a Unix like pathname, splits it on its components, and
+// remove empty elements and unnecessary leading and trailing slashes.
+//
+// Returns:
+//   - string: directory
+//   - string: filename
+//   - string: completely reconstructed path.
 func splitPath(pathName string) (string, string, string) {
 	var ret []string
 
@@ -180,7 +227,7 @@ func splitPath(pathName string) (string, string, string) {
 }
 
 //------------------------------------------------------------------------------
-//	Gdrive Primitives: Direct interfaces with the Gdrive
+//	Gdrive Primitives: Direct interfaces with Gdrive
 //------------------------------------------------------------------------------
 
 // GdriveFilesGet Returns a *drive.File object for the object identified by 'fileId'
@@ -311,7 +358,8 @@ func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
 // Downloads a file named 'srcPath' into 'localFile'. localFile will be overwritten
 // if it exists.
 //
-// The method returns an error type indicating the status of the operation.
+// Returns:
+//   - error
 func (g *Gdrive) Download(srcPath string, localFile string) error {
 	// Sanitize
 	_, _, srcPath = splitPath(srcPath)
@@ -331,10 +379,7 @@ func (g *Gdrive) Download(srcPath string, localFile string) error {
 
 	srcFileObj, err := g.Stat(srcPath)
 	if err != nil {
-		return fmt.Errorf("Download: %v", err)
-	}
-	if srcFileObj == nil {
-		return fmt.Errorf("Download: Path \"%s\" does not exist", srcPath)
+		return err
 	}
 	if srcFileObj.DownloadUrl == "" {
 		return fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
@@ -371,12 +416,13 @@ func (g *Gdrive) Download(srcPath string, localFile string) error {
 }
 
 // Insert a file named 'dstPath' with the contents of 'localFile'. This method
-// will first insert the file under DRIVE_TMP_FOLDER and then move it to its
+// first inserts the file under DRIVE_TMP_FOLDER and then moves it to its
 // final location. DRIVE_TMP_FOLDER will be automatically created, if needed.
 // The inserted object's modifiedDate will be set to the mtime of localFile.
 //
-// The method returns a *drive.File object pointing to the file in its final
-// location, or nil to indicate path related problems.
+// Returns:
+//   - *drive.File: pointing to the file in its final location.
+//   - error
 func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	// Sanitize
 	_, dstFile, dstPath := splitPath(dstPath)
@@ -389,9 +435,6 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if tmpDirObj == nil {
-		return nil, fmt.Errorf("Insert: Unable to create temporary folder \"%s\"", DRIVE_TMP_FOLDER)
-	}
 
 	tmpFile := fmt.Sprintf("%s.%d", dstFile, g.gdrive_uid)
 	tmpPath := DRIVE_TMP_FOLDER + "/" + tmpFile
@@ -399,12 +442,13 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	// Delete temp file if it already exists (file or directory)
 	tmpFileObj, err := g.Stat(tmpPath)
 	if err != nil {
-		return nil, err
-	}
-	if tmpFileObj != nil {
-		_, err = g.GdriveFilesTrash(tmpFileObj.Id)
-		if err != nil {
-			return nil, fmt.Errorf("Insert: Error removing existing temporary file \"%s\": %v", tmpPath, err)
+		if IsObjectNotFound(err) {
+			_, err = g.GdriveFilesTrash(tmpFileObj.Id)
+			if err != nil {
+				return nil, fmt.Errorf("Insert: Error removing existing temporary file \"%s\": %v", tmpPath, err)
+			}
+		} else {
+			return nil, err
 		}
 	}
 
@@ -418,9 +462,6 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	dstFileObj, err := g.Move(tmpPath, dstPath)
 	if err != nil {
 		return nil, err
-	}
-	if dstFileObj == nil {
-		return nil, fmt.Errorf("Insert: Error moving tmp file \"%s\" to \"%s\"", tmpPath, dstPath)
 	}
 
 	// Set modified date to localFile's mtime
@@ -438,13 +479,16 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 }
 
 // Listdir returns a slice of *drive.File objects under 'drivePath'
-// which match 'query' or nil if the path does not exist. If query is
-// not specified, it defaults to 'trashed = false'.
+// which match 'query'. If query is blank, it defaults to 'trashed = false'.
+//
+// Returns:
+//   - []*drive.File of all objects inside drivePath matching query
+//   - error
 func (g *Gdrive) Listdir(drivePath string, query string) ([]*drive.File, error) {
 	var ret []*drive.File
 
 	driveDir, err := g.Stat(drivePath)
-	if err != nil || driveDir == nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -467,10 +511,12 @@ func (g *Gdrive) Listdir(drivePath string, query string) ([]*drive.File, error) 
 	return ret, nil
 }
 
-// Mkdir creates the directory (folder) specified by drivePath. It returns nil if
-// duplicate elements exist anywhere in the path or part of the path is missing or
-// the *drive.File of the newly created directory. If a directory already exists
-// with the same name, this method will return a *drive.File object pointing to it.
+// Mkdir creates the directory (folder) specified by drivePath.
+//
+// Returns:
+//   - *drive.File containing the object just created, or, *drive.File of
+//     an existing object.
+//   - err
 func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	var parentId string
 
@@ -483,7 +529,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	// If the path already exists, returns a *drive.File
 	// struct pointing to it.
 	driveFile, err := g.Stat(drivePath)
-	if err != nil || driveFile != nil {
+	if err != nil {
 		return driveFile, err
 	}
 
@@ -492,7 +538,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 		parentId = "root"
 	} else {
 		driveFile, err = g.Stat(pathname)
-		if err != nil || driveFile == nil {
+		if err != nil {
 			return nil, err
 		}
 		parentId = driveFile.Id
@@ -506,19 +552,20 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Move the object in 'srcPath' (file or directory) to 'dstPath'.  It does that
-// by removing the directory in srcPath from the list of parents of the object,
-// and adding dstPath. The object will be renamed (meaning, it's possible to
-// move and rename in a single operation.)
+// Rename/Move the object in 'srcPath' (file or directory) to 'dstPath'.  It
+// does that by removing the directory in srcPath from the list of parents of
+// the object, and adding dstPath.
 //
-// Returns: *drive.File, err for the moved object.
+// Returns:
+//   - *drive.File containing the destination object
+//   - error
 func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	// Sanitize Source & Destination
 	srcDir, _, srcPath := splitPath(srcPath)
 	dstDir, dstFile, dstPath := splitPath(dstPath)
 
 	if srcPath == "" || dstPath == "" {
-		return nil, fmt.Errorf("Move: Source object and destination dir must be set")
+		return nil, fmt.Errorf("Move: Source and destination paths must be set")
 	}
 
 	// We need the source parentId, destination Id and object Id
@@ -526,31 +573,21 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if srcParentObj == nil {
-		return nil, fmt.Errorf("Move: Unable to find id for (parent dir) \"%s\"", srcDir)
-	}
-
 	srcObj, err := g.Stat(srcPath)
 	if err != nil {
 		return nil, err
 	}
-	if srcObj == nil {
-		return nil, fmt.Errorf("Move: Unable to find object id for \"%s\"", srcPath)
-	}
-
 	dstDirObj, err := g.Stat(dstDir)
 	if err != nil {
 		return nil, err
 	}
-	if dstDirObj == nil {
-		return nil, fmt.Errorf("Move: Unable to find object id for destination dir \"%s\"", dstDir)
-	}
 
+	// Remove destination file if it exists
 	dstFileObj, err := g.Stat(dstPath)
-	if err != nil {
+	if err != nil && !IsObjectNotFound(err) {
 		return nil, err
 	}
-	if dstFileObj != nil {
+	if !IsObjectNotFound(err) {
 		_, err = g.GdriveFilesTrash(dstFileObj.Id)
 		if err != nil {
 			return nil, fmt.Errorf("Move: Error removing destination file \"%s\": %v", dstPath, err)
@@ -568,9 +605,11 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Checks the remote dstPath's modification time and returns true if it is
-// older than the mtime of localFile. It should be used to determine whether a
-// file should be copied or not.
+// Check if the remote dstPath's is Outdated, compared to localFile.
+//
+// Returns:
+//   - bool: true if dstPath is older than localFile, false otherwise.
+//	 - error
 func (g *Gdrive) RemotePathOutdated(dstPath string, localFile string) (bool, error) {
 	// Sanitize
 	_, _, dstPath = splitPath(dstPath)
@@ -590,11 +629,11 @@ func (g *Gdrive) RemotePathOutdated(dstPath string, localFile string) (bool, err
 
 	dstPathObj, err := g.Stat(dstPath)
 	if err != nil {
+		// Object not found means "needs to update"
+		if IsObjectNotFound(err) {
+			return true, nil
+		}
 		return false, fmt.Errorf("RemotePathOutdated: Unable to stat remote path \"%s\": %v", dstPath, err)
-	}
-	// No remote copy means outdated
-	if dstPathObj == nil {
-		return true, nil
 	}
 
 	dstPathDate, err := ModifiedDate(dstPathObj)
@@ -617,16 +656,14 @@ func (g *Gdrive) RemotePathOutdated(dstPath string, localFile string) (bool, err
 // SetModifiedDate sets the modification date of the file/directory specified by
 // 'drivePath' to 'modifiedDate'.
 //
-// Returns a *drive.File pointing to the modified file/dir and an error. If a
-// non-fatal error occurs, *drive.File will be set to nil.
+// Returns:
+//   - *drive.File pointing to the modified file/dir
+//   - error
 func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*drive.File, error) {
 
 	driveFile, err := g.Stat(drivePath)
 	if err != nil {
 		return nil, err
-	}
-	if driveFile == nil {
-		return nil, fmt.Errorf("SetModifiedDate: Unable to fetch metadata for \"%s\"", drivePath)
 	}
 
 	// For some reason Gdrive requires the date to contain the nano information
@@ -634,7 +671,6 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	// be zero. Add 1ns to make sure format will produce a date in the right format.
 	modifiedDate = modifiedDate.Truncate(1 * time.Second)
 	modifiedDate = modifiedDate.Add(1 * time.Nanosecond)
-
 	rfcDate := modifiedDate.Format(time.RFC3339Nano)
 
 	// Set Date
@@ -649,9 +685,16 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 // Stat receives a path like filename and parses each element in turn, returning
 // the *drive.File object for the last element in the path.
 //
-// Since Google Drive allows more than one object with the same name and Unix
-// filesystems do not, Stat will return a nil *drive.File object if duplicate
-// elements are found anywhere along the path.
+// Google Drive allows more than one object with the same name and Unix
+// filesystems do not. Stat returns an error if a duplicate is found anywhere
+// in the requested path (which will require human intervention.) Stat returns
+// an instance of GdrivePathError with ObjectNotFound set if the requested
+// object cannot be found. Use g.IsObjecNotFound(err) to test for this
+// condition.
+//
+// Returns:
+//   - *drive.File object
+//   - error
 func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	var (
 		children []*drive.ChildReference
@@ -707,6 +750,12 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		if err != nil || len(children) == 0 {
 			return nil, err
 		}
+		if len(children) == 0 {
+			return nil, &GdrivePathError{
+				ObjectNotFound: true,
+				msg:            fmt.Sprintf("Stat: Missing directory named \"%s\" in path \"%s\"", elem, drivePath),
+			}
+		}
 		if len(children) > 1 {
 			return nil, fmt.Errorf("Stat: More than one directory named \"%s\" exists in path \"%s\"", elem, drivePath)
 		}
@@ -720,8 +769,14 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	if filename != "" {
 		query = fmt.Sprintf("title = '%s' and trashed = false", filename)
 		children, err = g.GdriveChildrenList(parent, query)
-		if err != nil || len(children) == 0 {
+		if err != nil {
 			return nil, err
+		}
+		if len(children) == 0 {
+			return nil, &GdrivePathError{
+				ObjectNotFound: true,
+				msg:            fmt.Sprintf("Stat: Object \"%s\" not found", drivePath),
+			}
 		}
 		if len(children) > 1 {
 			return nil, fmt.Errorf("Stat: More than one file/directory named \"%s\" exists in path \"%s\"", filename, drivePath)
@@ -736,26 +791,4 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		g.cacheAdd(drivePath, ret)
 	}
 	return ret, err
-}
-
-//------------------------------------------------------------------------------
-// Helper functions
-//
-// There functions work on a *drive.File object, making commonly used
-// accessed struct members available to the caller.
-//-----------------------------------------------------------------------------
-
-// IsDir returns true if the passed *drive.File object is a directory
-func IsDir(driveFile *drive.File) bool {
-	return (driveFile.MimeType == MIMETYPE_FOLDER)
-}
-
-// CreateDate returns the time.Time representation of the *drive.File object's creation date.
-func CreateDate(driveFile *drive.File) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, driveFile.CreatedDate)
-}
-
-// ModifiedDate returns the time.Time representation of the *drive.File object's modification date.
-func ModifiedDate(driveFile *drive.File) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
 }
