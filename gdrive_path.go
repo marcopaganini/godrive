@@ -748,7 +748,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		// Test: One and only one directory
 		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType = '%s'", elem, MIMETYPE_FOLDER)
 		children, err = g.GdriveChildrenList(parent, query)
-		if err != nil || len(children) == 0 {
+		if err != nil {
 			return nil, err
 		}
 		if len(children) == 0 {
