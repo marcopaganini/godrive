@@ -377,7 +377,7 @@ func (g *Gdrive) Download(srcPath string, localFile string) error {
 	}
 
 	// Create a temporary file and write to it, renaming at the end.
-	tmpFile := fmt.Sprintf("temp-%d-%d-%d-%d", rand.Int31(), rand.Int31())
+	tmpFile := fmt.Sprintf("temp-%d-%d", rand.Int31(), rand.Int31())
 	tmpWriter, err := os.Create(tmpFile)
 	if err != nil {
 		return fmt.Errorf("Download: Error creating \"%s\": %v", tmpFile, err)
@@ -421,7 +421,7 @@ func (g *Gdrive) Insert(dstPath string, reader io.Reader) (*drive.File, error) {
 		return nil, err
 	}
 
-	tmpFile := fmt.Sprintf("temp-%d-%d-%d-%d", rand.Int31(), rand.Int31())
+	tmpFile := fmt.Sprintf("temp-%d-%d", rand.Int31(), rand.Int31())
 	tmpPath := DRIVE_TMP_FOLDER + "/" + tmpFile
 
 	// Delete temp file if it already exists (file or directory)
