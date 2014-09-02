@@ -15,10 +15,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"mime"
 	"net/http"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -265,45 +263,38 @@ func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.Chi
 }
 
 // GdriveFilesInsert inserts a new Object (file/dir) on Google Drive under
-// 'parentId'. The object's contents will come from 'localFile'.  If
-// 'localFile' is not set, an empty object will be created (this is how we
-// create directories). The title of the object will be set to 'title' and will
-// default to the basename of the file if not set. The object's MIME Type will
-// be set to 'mimeType', or automatically detected if mimeType is blank.
+// 'parentId'. The object's contents will come from 'reader' (io.Reader). If
+// reader is nil, an empty object will be created (this is how we create
+// directories). The title of the object will be set to 'title' and the
+// object's MIME Type will be set to 'mimeType', or automatically detected if
+// mimeType is blank.
 //
 // This method returns a *drive.File object pointing to the file just inserted.
-func (g *Gdrive) GdriveFilesInsert(localFile string, title string, parentId string, mimeType string) (*drive.File, error) {
-	var err error
-	var goFile *os.File
-	var r *drive.File
+func (g *Gdrive) GdriveFilesInsert(reader io.Reader, title string, parentId string, mimeType string) (*drive.File, error) {
+	var (
+		err       error
+		driveFile *drive.File
+		ret       *drive.File
+	)
 
-	// Default title to basename of file
-	if title == "" {
-		title = path.Base(localFile)
-	}
-	driveFile := &drive.File{Title: title, MimeType: mimeType}
-	if mimeType == "" {
-		driveFile.MimeType = mime.TypeByExtension(path.Ext(localFile))
+	driveFile = &drive.File{Title: title, MimeType: mimeType}
+	if mimeType != "" {
+		driveFile.MimeType = mimeType
 	}
 	// Set parentId
 	if parentId != "" {
 		p := &drive.ParentReference{Id: parentId}
 		driveFile.Parents = []*drive.ParentReference{p}
 	}
-	// Only insert file media if localFile is a filename
-	if localFile != "" {
-		goFile, err = os.Open(localFile)
-		if err != nil {
-			return nil, err
-		}
-		r, err = g.service.Files.Insert(driveFile).Media(goFile).Do()
+	if reader != nil {
+		ret, err = g.service.Files.Insert(driveFile).Media(reader).Do()
 	} else {
-		r, err = g.service.Files.Insert(driveFile).Do()
+		ret, err = g.service.Files.Insert(driveFile).Do()
 	}
 	if err != nil {
 		return nil, err
 	}
-	return r, nil
+	return ret, nil
 }
 
 // GdriveFilesPatch patches the file's metadata. The following information about the file
@@ -386,7 +377,7 @@ func (g *Gdrive) Download(srcPath string, localFile string) error {
 	}
 
 	// Create a temporary file and write to it, renaming at the end.
-	tmpFile := fmt.Sprintf("%s.%d", localFile, g.gdrive_uid)
+	tmpFile := fmt.Sprintf("temp-%d-%d-%d-%d", rand.Int31(), rand.Int31())
 	tmpWriter, err := os.Create(tmpFile)
 	if err != nil {
 		return fmt.Errorf("Download: Error creating \"%s\": %v", tmpFile, err)
@@ -415,28 +406,22 @@ func (g *Gdrive) Download(srcPath string, localFile string) error {
 	return nil
 }
 
-// Insert a file named 'dstPath' with the contents of 'localFile'. This method
-// first inserts the file under DRIVE_TMP_FOLDER and then moves it to its
-// final location. DRIVE_TMP_FOLDER will be automatically created, if needed.
-// The inserted object's modifiedDate will be set to the mtime of localFile.
+// Insert a file named 'dstPath' with the contents coming from reader. This
+// method first inserts the file under DRIVE_TMP_FOLDER and then moves it to
+// its final location. DRIVE_TMP_FOLDER will be automatically created, if
+// needed.
 //
 // Returns:
 //   - *drive.File: pointing to the file in its final location.
 //   - error
-func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
-	// Sanitize
-	_, dstFile, dstPath := splitPath(dstPath)
-	if dstPath == "" {
-		return nil, fmt.Errorf("Insert: empty destination path")
-	}
-
+func (g *Gdrive) Insert(dstPath string, reader io.Reader) (*drive.File, error) {
 	// We always upload to DRIVE_TMP_FOLDER so it must always exist
 	tmpDirObj, err := g.Mkdir(DRIVE_TMP_FOLDER)
 	if err != nil {
 		return nil, err
 	}
 
-	tmpFile := fmt.Sprintf("%s.%d", dstFile, g.gdrive_uid)
+	tmpFile := fmt.Sprintf("temp-%d-%d-%d-%d", rand.Int31(), rand.Int31())
 	tmpPath := DRIVE_TMP_FOLDER + "/" + tmpFile
 
 	// Delete temp file if it already exists (file or directory)
@@ -452,7 +437,7 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 	}
 
 	// Insert file into tmp dir with the temporary name
-	tmpFileObj, err = g.GdriveFilesInsert(localFile, tmpFile, tmpDirObj.Id, "")
+	tmpFileObj, err = g.GdriveFilesInsert(reader, tmpFile, tmpDirObj.Id, "")
 	if err != nil {
 		return nil, fmt.Errorf("Insert: Error inserting temporary file \"%s\": %v", tmpPath)
 	}
@@ -463,12 +448,40 @@ func (g *Gdrive) Insert(dstPath string, localFile string) (*drive.File, error) {
 		return nil, err
 	}
 
+	// No need to add to cache since Move (above) does it for us.
+	return dstFileObj, nil
+}
+
+// Insert a file named 'dstPath' with the contents of 'localFile'. This method
+// first inserts the file under DRIVE_TMP_FOLDER and then moves it to its
+// final location. DRIVE_TMP_FOLDER will be automatically created, if needed.
+// The inserted object's modifiedDate will be set to the mtime of localFile.
+//
+// Returns:
+//   - *drive.File: pointing to the file in its final location.
+//   - error
+func (g *Gdrive) InsertFile(dstPath string, localFile string) (*drive.File, error) {
+	// Sanitize
+	_, _, dstPath = splitPath(dstPath)
+	if dstPath == "" {
+		return nil, fmt.Errorf("InsertFile: empty destination path")
+	}
+
+	reader, err := os.Open(localFile)
+	if err != nil {
+		return nil, fmt.Errorf("InsertFile: Error opening \"%s\": %v", localFile, err)
+	}
+	_, err = g.Insert(dstPath, reader)
+	if err != nil {
+		return nil, err
+	}
+
 	// Set modified date to localFile's mtime
 	fi, err := os.Stat(localFile)
 	if err != nil {
 		return nil, fmt.Errorf("Insert: Unable to stat localFile \"%s\": %v", localFile, err)
 	}
-	dstFileObj, err = g.SetModifiedDate(dstPath, fi.ModTime())
+	dstFileObj, err := g.SetModifiedDate(dstPath, fi.ModTime())
 	if err != nil {
 		return nil, fmt.Errorf("Insert: Unable to set date of \"%s\": %v", dstPath, err)
 	}
@@ -545,7 +558,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 		parentId = driveFile.Id
 	}
 
-	driveFile, err = g.GdriveFilesInsert("", dirname, parentId, MIMETYPE_FOLDER)
+	driveFile, err = g.GdriveFilesInsert(nil, dirname, parentId, MIMETYPE_FOLDER)
 	if err != nil {
 		return nil, err
 	}
