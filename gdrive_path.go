@@ -655,54 +655,6 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Check if the remote dstPath's is Outdated, compared to localFile.
-//
-// Returns:
-//   - bool: true if dstPath is older than localFile, false otherwise.
-//	 - error
-func (g *Gdrive) RemotePathOutdated(dstPath string, localFile string) (bool, error) {
-	// Sanitize
-	_, _, dstPath = splitPath(dstPath)
-	if dstPath == "" {
-		return false, fmt.Errorf("RemotePathOutdated: empty destination path")
-	}
-
-	fi, err := os.Stat(localFile)
-	if err != nil {
-		return false, fmt.Errorf("RemotePathOutdated: Unable to stat \"%s\": %v", localFile, err)
-	}
-
-	// We can only upload regular files (for now)
-	if !fi.Mode().IsRegular() {
-		return false, fmt.Errorf("RemotePathOutdated: We can only upload regular files (for now) \"%s\"", localFile)
-	}
-
-	dstPathObj, err := g.Stat(dstPath)
-	if err != nil {
-		// Object not found means "needs to update"
-		if IsObjectNotFound(err) {
-			return true, nil
-		}
-		return false, fmt.Errorf("RemotePathOutdated: Unable to stat remote path \"%s\": %v", dstPath, err)
-	}
-
-	dstPathDate, err := ModifiedDate(dstPathObj)
-	if err != nil {
-		return false, fmt.Errorf("RemotePathOutdated: Unable to retrieve Modified date of \"%s\": %v", dstPath, err)
-	}
-
-	// Comparing with nanoseconds == rounding problems
-	dstPathDate = dstPathDate.Truncate(time.Second)
-	localFileDate := fi.ModTime().Truncate(time.Second)
-
-	// We support copying to directories (they'll be erased by Insert)
-	if localFileDate.After(dstPathDate) {
-		return true, nil
-	}
-
-	return false, nil
-}
-
 // SetModifiedDate sets the modification date of the file/directory specified by
 // 'drivePath' to 'modifiedDate'.
 //
