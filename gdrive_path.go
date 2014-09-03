@@ -195,9 +195,15 @@ func IsDir(driveFile *drive.File) bool {
 	return (driveFile.MimeType == MIMETYPE_FOLDER)
 }
 
-// ModifiedDate returns the time.Time representation of the *drive.File object's modification date.
+// ModifiedDate returns the time.Time representation of the *drive.File
+// object's modification date, rounded to the nearest second. Comparing dates
+// with nanosecond information leads to rounding errors.
 func ModifiedDate(driveFile *drive.File) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
+	tt, err := time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return tt.Truncate(time.Second), nil
 }
 
 // splitPath takes a Unix like pathname, splits it on its components, and
