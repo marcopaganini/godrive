@@ -346,64 +346,94 @@ func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
 //	carefully since they do not add/remove objects from the object cache.
 //------------------------------------------------------------------------------
 
-// Downloads a file named 'srcPath' into 'localFile'. localFile will be overwritten
-// if it exists.
+// Downloads a file named 'srcPath' into the specified io.Writer
 //
 // Returns:
+//	 - int64 - number of bytes downloaded
 //   - error
-func (g *Gdrive) Download(srcPath string, localFile string) error {
+func (g *Gdrive) Download(srcPath string, writer io.Writer) (int64, error) {
 	// Sanitize
 	_, _, srcPath = splitPath(srcPath)
 	if srcPath == "" {
-		return fmt.Errorf("Download: empty source path")
+		return 0, fmt.Errorf("Download: empty source path")
+	}
+
+	srcFileObj, err := g.Stat(srcPath)
+	if err != nil {
+		return 0, err
+	}
+	if srcFileObj.DownloadUrl == "" {
+		return 0, fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
+	}
+
+	req, err := http.NewRequest("GET", srcFileObj.DownloadUrl, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := g.transport.RoundTrip(req)
+	defer resp.Body.Close()
+
+	written, err := io.Copy(writer, resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	return written, nil
+}
+
+// Downloads a file named 'srcPath' into 'localFile'. localFile will be
+// overwritten if it exists. The file is first downloaded into a temporary file
+// and then atomically moved into the destination file.
+//
+// Returns:
+//	 - int64 - number of bytes downloaded
+//   - error
+func (g *Gdrive) DownloadToFile(srcPath string, localFile string) (int64, error) {
+	// Sanitize
+	_, _, srcPath = splitPath(srcPath)
+	if srcPath == "" {
+		return 0, fmt.Errorf("DownloadToFile: empty source path")
 	}
 	if localFile == "" {
-		return fmt.Errorf("Download: empty local file")
+		return 0, fmt.Errorf("DownloadToFile: empty local file")
 	}
 	// If the file exists, it must be a regular file
 	fi, err := os.Stat(localFile)
 	if err != nil {
 		if os.IsExist(err) && !fi.Mode().IsRegular() {
-			return fmt.Errorf("Download: Local file \"%s\" exists and is not a regular file", localFile)
+			return 0, fmt.Errorf("Download: Local file \"%s\" exists and is not a regular file", localFile)
 		}
 	}
 
 	srcFileObj, err := g.Stat(srcPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if srcFileObj.DownloadUrl == "" {
-		return fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
+		return 0, fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
 	}
 
 	// Create a temporary file and write to it, renaming at the end.
 	tmpFile := fmt.Sprintf("temp-%d-%d", rand.Int31(), rand.Int31())
 	tmpWriter, err := os.Create(tmpFile)
 	if err != nil {
-		return fmt.Errorf("Download: Error creating \"%s\": %v", tmpFile, err)
+		return 0, err
 	}
 	defer tmpWriter.Close()
 	defer os.Remove(tmpFile)
 
-	req, err := http.NewRequest("GET", srcFileObj.DownloadUrl, nil)
+	written, err := g.Download(srcPath, tmpWriter)
 	if err != nil {
-		return fmt.Errorf("Download: %v", err)
-	}
-
-	resp, err := g.transport.RoundTrip(req)
-	defer resp.Body.Close()
-
-	_, err = io.Copy(tmpWriter, resp.Body)
-	if err != nil {
-		return fmt.Errorf("Download: %v", err)
+		return 0, err
 	}
 
 	err = os.Rename(tmpFile, localFile)
 	if err != nil {
-		return fmt.Errorf("Download: %v", err)
+		return 0, err
 	}
 
-	return nil
+	return written, nil
 }
 
 // Insert a file named 'dstPath' with the contents coming from reader. This
