@@ -352,40 +352,33 @@ func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
 //	carefully since they do not add/remove objects from the object cache.
 //------------------------------------------------------------------------------
 
-// Downloads a file named 'srcPath' into the specified io.Writer
+// Return an io.Reader to the file pointed by srcPath.
 //
 // Returns:
-//	 - int64 - number of bytes downloaded
+//	 - io.Reader
 //   - error
-func (g *Gdrive) Download(srcPath string, writer io.Writer) (int64, error) {
+func (g *Gdrive) Download(srcPath string) (io.Reader, error) {
 	// Sanitize
 	_, _, srcPath = splitPath(srcPath)
 	if srcPath == "" {
-		return 0, fmt.Errorf("Download: empty source path")
+		return nil, fmt.Errorf("Download: empty source path")
 	}
 
 	srcFileObj, err := g.Stat(srcPath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if srcFileObj.DownloadUrl == "" {
-		return 0, fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
+		return nil, fmt.Errorf("Download: File \"%s\" is not downloadable (no body?)", srcPath)
 	}
 
 	req, err := http.NewRequest("GET", srcFileObj.DownloadUrl, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	resp, err := g.transport.RoundTrip(req)
-	defer resp.Body.Close()
-
-	written, err := io.Copy(writer, resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	return written, nil
+	return resp.Body, err
 }
 
 // Downloads a file named 'srcPath' into 'localFile'. localFile will be
@@ -429,7 +422,12 @@ func (g *Gdrive) DownloadToFile(srcPath string, localFile string) (int64, error)
 	defer tmpWriter.Close()
 	defer os.Remove(tmpFile)
 
-	written, err := g.Download(srcPath, tmpWriter)
+	reader, err := g.Download(srcPath)
+	if err != nil {
+		return 0, err
+	}
+
+	written, err := io.Copy(tmpWriter, reader)
 	if err != nil {
 		return 0, err
 	}
