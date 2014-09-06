@@ -524,13 +524,13 @@ func (g *Gdrive) InsertFile(dstPath string, localFile string) (*drive.File, erro
 	return dstFileObj, nil
 }
 
-// Listdir returns a slice of *drive.File objects under 'drivePath'
+// ListDir returns a slice of *drive.File objects under 'drivePath'
 // which match 'query'. If query is blank, it defaults to 'trashed = false'.
 //
 // Returns:
 //   - []*drive.File of all objects inside drivePath matching query
 //   - error
-func (g *Gdrive) Listdir(drivePath string, query string) ([]*drive.File, error) {
+func (g *Gdrive) ListDir(drivePath string, query string) ([]*drive.File, error) {
 	var ret []*drive.File
 
 	driveDir, err := g.Stat(drivePath)
