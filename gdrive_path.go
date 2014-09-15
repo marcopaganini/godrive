@@ -206,6 +206,22 @@ func ModifiedDate(driveFile *drive.File) (time.Time, error) {
 	return tt.Truncate(time.Second), nil
 }
 
+// Escape single quotes inside string with a backslash
+func escapeQuotes(str string) string {
+	var ret []string
+	if strings.Index(str, "'") == -1 {
+		return str
+	}
+	tokens := strings.Split(str, "'")
+	for idx := 0; idx < len(tokens); idx++ {
+		ret = append(ret, tokens[idx])
+		if idx != len(tokens)-1 {
+			ret = append(ret, "\\'")
+		}
+	}
+	return strings.Join(ret, "")
+}
+
 // splitPath takes a Unix like pathname, splits it on its components, and
 // remove empty elements and unnecessary leading and trailing slashes.
 //
@@ -735,7 +751,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		}
 
 		// Test: No elements in our directory path are files
-		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType != '%s'", elem, MIMETYPE_FOLDER)
+		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType != '%s'", escapeQuotes(elem), MIMETYPE_FOLDER)
 		children, err = g.GdriveChildrenList(parent, query)
 		if err != nil {
 			return nil, err
@@ -745,7 +761,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		}
 
 		// Test: One and only one directory
-		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType = '%s'", elem, MIMETYPE_FOLDER)
+		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType = '%s'", escapeQuotes(elem), MIMETYPE_FOLDER)
 		children, err = g.GdriveChildrenList(parent, query)
 		if err != nil {
 			return nil, err
@@ -767,7 +783,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	// a directory, but duplicates are not supported.
 
 	if filename != "" {
-		query = fmt.Sprintf("title = '%s' and trashed = false", filename)
+		query = fmt.Sprintf("title = '%s' and trashed = false", escapeQuotes(filename))
 		children, err = g.GdriveChildrenList(parent, query)
 		if err != nil {
 			return nil, err
