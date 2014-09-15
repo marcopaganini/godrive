@@ -489,7 +489,7 @@ func (g *Gdrive) Insert(dstPath string, reader io.Reader) (*drive.File, error) {
 	// Insert file into tmp dir with the temporary name
 	tmpFileObj, err = g.GdriveFilesInsert(reader, tmpFile, tmpDirObj.Id, "")
 	if err != nil {
-		return nil, fmt.Errorf("Insert: Error inserting temporary file \"%s\": %v", tmpPath)
+		return nil, fmt.Errorf("Insert: Error inserting temporary file \"%s\": %v", tmpPath, err)
 	}
 
 	// Move file to definitive location
