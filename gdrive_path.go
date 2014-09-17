@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcopaganini/logger"
+
 	oauth "code.google.com/p/goauth2/oauth"
 	drive "code.google.com/p/google-api-go-client/drive/v2"
 )
@@ -50,6 +52,8 @@ type Gdrive struct {
 	transport *oauth.Transport
 	client    *http.Client
 	service   *drive.Service
+
+	Log *logger.Logger
 
 	// Unique Id for this instance
 	gdrive_uid int
@@ -92,6 +96,9 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	}
 	g.client = g.transport.Client()
 	g.service, err = drive.New(g.client)
+
+	// Logger method
+	g.Log = logger.New("")
 
 	// Unique Id for this instance
 	rand.Seed(time.Now().UnixNano())
