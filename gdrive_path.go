@@ -53,7 +53,7 @@ type Gdrive struct {
 	client    *http.Client
 	service   *drive.Service
 
-	Log *logger.Logger
+	log *logger.Logger
 
 	// Unique Id for this instance
 	gdrive_uid int
@@ -98,7 +98,7 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	g.service, err = drive.New(g.client)
 
 	// Logger method
-	g.Log = logger.New("")
+	g.log = logger.New("")
 
 	// Unique Id for this instance
 	rand.Seed(time.Now().UnixNano())
@@ -676,6 +676,11 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
+// Set the debug level for future uses of the log.Debug{ln,f} methods
+func (g *Gdrive) SetDebugLevel(n int) {
+	g.log.SetDebugLevel(n)
+}
+
 // SetModifiedDate sets the modification date of the file/directory specified by
 // 'drivePath' to 'modifiedDate'.
 //
@@ -703,6 +708,11 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	}
 	g.cacheAdd(drivePath, driveFile)
 	return driveFile, nil
+}
+
+// Set the verbose level for future uses of the log.Verbose{ln,f} methods
+func (g *Gdrive) SetVerboseLevel(n int) {
+	g.log.SetVerboseLevel(n)
 }
 
 // Stat receives a path like filename and parses each element in turn, returning
