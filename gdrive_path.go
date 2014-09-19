@@ -24,16 +24,22 @@ import (
 
 	oauth "code.google.com/p/goauth2/oauth"
 	drive "code.google.com/p/google-api-go-client/drive/v2"
+	"code.google.com/p/google-api-go-client/googleapi"
 )
 
-// Mime-Type used by Google Drive to indicate a folder
-const MIMETYPE_FOLDER = "application/vnd.google-apps.folder"
+const (
+	// Mime-Type used by Google Drive to indicate a folder
+	MIMETYPE_FOLDER = "application/vnd.google-apps.folder"
 
-// Directory in Google Drive to hold temporary copies of files during inserts
-const DRIVE_TMP_FOLDER = "tmp"
+	// Directory in Google Drive to hold temporary copies of files during inserts
+	DRIVE_TMP_FOLDER = "tmp"
 
-// Default cache TTL
-const CACHE_TTL_SECONDS = 60
+	// Default cache TTL
+	CACHE_TTL_SECONDS = 60
+
+	// Total number of tries when we get a 5xx from Gdrive (includes first attempt)
+	NUM_TRIES = 3
+)
 
 // Object cache
 type objCache struct {
@@ -229,6 +235,60 @@ func escapeQuotes(str string) string {
 	return strings.Join(ret, "")
 }
 
+// Execute a Gdrive Do() operation returning a *drive.ChildList and error from the
+// original operation. Retry operation (with exponential fallback) if a 5xx
+// is received from the other side.
+func driveChildListOpRetry(fn func() (*drive.ChildList, error)) (*drive.ChildList, error) {
+	var (
+		err            error
+		driveChildList *drive.ChildList
+	)
+	for try := 1; try <= NUM_TRIES; try++ {
+		driveChildList, err = fn()
+		if err != nil {
+			// HTTP error?
+			if derr, ok := err.(*googleapi.Error); ok {
+				// 5xx?
+				if derr.Code >= 500 || derr.Code <= 599 {
+					//time.Sleep(time.Millisecond * (rand.Int31n(2000) + 1000*try))
+					time.Sleep(time.Millisecond * time.Duration(1000*try))
+					continue
+				}
+			}
+			return nil, err
+		}
+		return driveChildList, err
+	}
+	return nil, err
+}
+
+// Execute a Gdrive Do() operation returning a *drive.File and error from the
+// original operation. Retry operation (with exponential fallback) if a 5xx
+// is received from the other side.
+func driveFileOpRetry(fn func() (*drive.File, error)) (*drive.File, error) {
+	var (
+		err       error
+		driveFile *drive.File
+	)
+	for try := 1; try <= NUM_TRIES; try++ {
+		driveFile, err = fn()
+		if err != nil {
+			// HTTP error?
+			if derr, ok := err.(*googleapi.Error); ok {
+				// 5xx?
+				if derr.Code >= 500 || derr.Code <= 599 {
+					//time.Sleep(time.Millisecond * (rand.Int31n(2000) + 1000*try))
+					time.Sleep(time.Millisecond * time.Duration(1000*try))
+					continue
+				}
+			}
+			return nil, err
+		}
+		return driveFile, err
+	}
+	return nil, err
+}
+
 // splitPath takes a Unix like pathname, splits it on its components, and
 // remove empty elements and unnecessary leading and trailing slashes.
 //
@@ -259,7 +319,7 @@ func splitPath(pathName string) (string, string, string) {
 
 // GdriveFilesGet Returns a *drive.File object for the object identified by 'fileId'
 func (g *Gdrive) GdriveFilesGet(fileId string) (*drive.File, error) {
-	f, err := g.service.Files.Get(fileId).Do()
+	f, err := driveFileOpRetry(g.service.Files.Get(fileId).Do)
 	if err != nil {
 		return nil, fmt.Errorf("GdriveFilesGet: Error retrieving File Metadata for fileId \"%s\": %v", fileId, err)
 	}
@@ -278,7 +338,7 @@ func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.Chi
 		if pageToken != "" {
 			c = c.PageToken(pageToken)
 		}
-		r, err := c.Do()
+		r, err := driveChildListOpRetry(c.Do)
 		if err != nil {
 			return nil, fmt.Errorf("GdriveChildrenList: fetching Id for parent_id \"%s\", query=\"%s\": %v", parentId, query, err)
 		}
@@ -316,9 +376,9 @@ func (g *Gdrive) GdriveFilesInsert(reader io.Reader, title string, parentId stri
 		driveFile.Parents = []*drive.ParentReference{p}
 	}
 	if reader != nil {
-		ret, err = g.service.Files.Insert(driveFile).Media(reader).Do()
+		ret, err = driveFileOpRetry(g.service.Files.Insert(driveFile).Media(reader).Do)
 	} else {
-		ret, err = g.service.Files.Insert(driveFile).Do()
+		ret, err = driveFileOpRetry(g.service.Files.Insert(driveFile).Do)
 	}
 	if err != nil {
 		return nil, err
@@ -356,7 +416,7 @@ func (g *Gdrive) GdriveFilesPatch(fileId string, title string, modifiedDate stri
 	if modifiedDate != "" {
 		p.SetModifiedDate(true)
 	}
-	r, err := p.Do()
+	r, err := driveFileOpRetry(p.Do)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +426,7 @@ func (g *Gdrive) GdriveFilesPatch(fileId string, title string, modifiedDate stri
 // GdriveFilesTrash moves the file indicated by 'fileId' to the Google Drive Trash.
 // It returns a *drive.File object pointing to the file inside Trash.
 func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
-	return g.service.Files.Trash(fileId).Do()
+	return driveFileOpRetry(g.service.Files.Trash(fileId).Do)
 }
 
 //------------------------------------------------------------------------------
