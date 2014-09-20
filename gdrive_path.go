@@ -43,7 +43,7 @@ const (
 
 // Object cache
 type objCache struct {
-	driveFile drive.File
+	obj       interface{}
 	timestamp time.Time
 }
 
@@ -64,8 +64,9 @@ type Gdrive struct {
 	// Unique Id for this instance
 	gdrive_uid int
 
-	// Object cache
-	cache map[string]*objCache
+	// caches (one for Drive.File objects, another for child objects)
+	filecache  *map[string]*objCache
+	childcache *map[string]*objCache
 }
 
 //------------------------------------------------------------------------------
@@ -110,8 +111,9 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	rand.Seed(time.Now().UnixNano())
 	g.gdrive_uid = rand.Int()
 
-	// Initialize blank cache
-	g.cache = map[string]*objCache{}
+	// Initialize blank caches
+	g.filecache = &map[string]*objCache{}
+	g.childcache = &map[string]*objCache{}
 
 	return g, err
 }
@@ -122,21 +124,23 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 
 // cacheAdd: Add/replace object in the cache using 'drivePath' as a key
 // Returns: nothing
-func (g *Gdrive) cacheAdd(drivePath string, driveFile *drive.File) {
-	obj := &objCache{*driveFile, time.Now()}
-	g.cache[drivePath] = obj
+func (g *Gdrive) cacheAdd(cache *map[string]*objCache, drivePath string, obj interface{}) {
+	item := &objCache{obj, time.Now()}
+	m := *cache
+	m[drivePath] = item
 }
 
 // cacheGet: Retrieves object from the cache using 'drivePath' as a key
-// Returns: *driveFile object or nil if not found or expired
-func (g *Gdrive) cacheGet(drivePath string) *drive.File {
-	obj, ok := g.cache[drivePath]
+// Returns: *interface{} object or nil if not found or expired
+func (g *Gdrive) cacheGet(cache *map[string]*objCache, drivePath string) interface{} {
+	m := *cache
+	item, ok := m[drivePath]
 	if ok {
-		if time.Now().After(obj.timestamp.Add(CACHE_TTL_SECONDS * time.Second)) {
-			g.cacheDel(drivePath)
+		if time.Now().After(item.timestamp.Add(CACHE_TTL_SECONDS * time.Second)) {
+			g.cacheDel(cache, drivePath)
 			return nil
 		} else {
-			return &obj.driveFile
+			return item.obj
 		}
 	}
 
@@ -145,8 +149,8 @@ func (g *Gdrive) cacheGet(drivePath string) *drive.File {
 
 // cacheDel: Removes object from the cache using 'drivePath' as a key.
 // Returns: nothing
-func (g *Gdrive) cacheDel(drivePath string) {
-	delete(g.cache, drivePath)
+func (g *Gdrive) cacheDel(cache *map[string]*objCache, drivePath string) {
+	delete(*cache, drivePath)
 }
 
 // Authenticates a newly created method (called by NewGdrivePath)
@@ -679,7 +683,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	g.cacheAdd(drivePath, driveFile)
+	g.cacheAdd(g.filecache, drivePath, driveFile)
 	return driveFile, nil
 }
 
@@ -723,16 +727,16 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Move: Error removing destination file \"%s\": %v", dstPath, err)
 		}
-		g.cacheDel(dstPath)
+		g.cacheDel(g.filecache, dstPath)
 	}
 
 	// Set parents and change name if needed
 	driveFile, err := g.GdriveFilesPatch(srcObj.Id, dstFile, "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
-	g.cacheDel(srcPath)
+	g.cacheDel(g.filecache, srcPath)
 	if err != nil {
 		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstPath, err)
 	}
-	g.cacheAdd(dstPath, driveFile)
+	g.cacheAdd(g.filecache, dstPath, driveFile)
 	return driveFile, nil
 }
 
@@ -766,7 +770,7 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	if err != nil {
 		return nil, err
 	}
-	g.cacheAdd(drivePath, driveFile)
+	g.cacheAdd(g.filecache, drivePath, driveFile)
 	return driveFile, nil
 }
 
@@ -793,12 +797,13 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 		children []*drive.ChildReference
 		query    string
 		err      error
+		subdirs  []string
 	)
 
 	// Cached?
-	driveFile := g.cacheGet(drivePath)
+	driveFile := g.cacheGet(g.filecache, drivePath)
 	if driveFile != nil {
-		return driveFile, nil
+		return driveFile.(*drive.File), nil
 	}
 
 	// Special case for "/" (root)
@@ -821,38 +826,49 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	//
 	// Note: this is expensive for what it is :(
 
-	for _, elem := range strings.Split(dirs, "/") {
-		// Split on blank strings returns one element
-		if elem == "" {
-			continue
-		}
+	if dirs != "" {
+		subdirs = strings.Split(dirs, "/")
 
-		// Test: No elements in our directory path are files
-		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType != '%s'", escapeQuotes(elem), MIMETYPE_FOLDER)
-		children, err = g.GdriveChildrenList(parent, query)
-		if err != nil {
-			return nil, err
-		}
-		if len(children) != 0 {
-			return nil, fmt.Errorf("Stat: Element \"%s\" in path \"%s\" is a file, not a directory", elem, drivePath)
-		}
+		for idx := 0; idx < len(subdirs); idx++ {
+			elem := subdirs[idx]
+			ppath := strings.Join(subdirs[0:idx+1], "/")
 
-		// Test: One and only one directory
-		query = fmt.Sprintf("title = '%s' and trashed = false and mimeType = '%s'", escapeQuotes(elem), MIMETYPE_FOLDER)
-		children, err = g.GdriveChildrenList(parent, query)
-		if err != nil {
-			return nil, err
-		}
-		if len(children) == 0 {
-			return nil, &GdrivePathError{
-				ObjectNotFound: true,
-				msg:            fmt.Sprintf("Stat: Missing directory named \"%s\" in path \"%s\"", elem, drivePath),
+			// If partial path cached, we set the parent to the id
+			// of the cached object and keep traversing down the path.
+			child := g.cacheGet(g.childcache, ppath)
+			if child != nil {
+				parent = child.(*drive.ChildReference).Id
+			} else {
+				// Test: No elements in our directory path are files
+				query = fmt.Sprintf("title = '%s' and trashed = false and mimeType != '%s'", escapeQuotes(elem), MIMETYPE_FOLDER)
+				children, err = g.GdriveChildrenList(parent, query)
+
+				if err != nil {
+					return nil, err
+				}
+				if len(children) != 0 {
+					return nil, fmt.Errorf("Stat: Element \"%s\" in path \"%s\" is a file, not a directory", elem, drivePath)
+				}
+
+				// Test: One and only one directory
+				query = fmt.Sprintf("title = '%s' and trashed = false and mimeType = '%s'", escapeQuotes(elem), MIMETYPE_FOLDER)
+				children, err = g.GdriveChildrenList(parent, query)
+				if err != nil {
+					return nil, err
+				}
+				if len(children) == 0 {
+					return nil, &GdrivePathError{
+						ObjectNotFound: true,
+						msg:            fmt.Sprintf("Stat: Missing directory named \"%s\" in path \"%s\"", elem, drivePath),
+					}
+				}
+				if len(children) > 1 {
+					return nil, fmt.Errorf("Stat: More than one directory named \"%s\" exists in path \"%s\"", elem, drivePath)
+				}
+				parent = children[0].Id
+				g.cacheAdd(g.childcache, ppath, children[0])
 			}
 		}
-		if len(children) > 1 {
-			return nil, fmt.Errorf("Stat: More than one directory named \"%s\" exists in path \"%s\"", elem, drivePath)
-		}
-		parent = children[0].Id
 	}
 
 	// At this point, the entire path is good. We now check for 'filename'
@@ -881,7 +897,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 
 	ret, err := g.GdriveFilesGet(parent)
 	if err == nil {
-		g.cacheAdd(drivePath, ret)
+		g.cacheAdd(g.filecache, drivePath, ret)
 	}
 	return ret, err
 }
