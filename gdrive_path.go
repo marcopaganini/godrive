@@ -24,7 +24,6 @@ import (
 
 	oauth "code.google.com/p/goauth2/oauth"
 	drive "code.google.com/p/google-api-go-client/drive/v2"
-	"code.google.com/p/google-api-go-client/googleapi"
 )
 
 const (
@@ -34,18 +33,9 @@ const (
 	// Directory in Google Drive to hold temporary copies of files during inserts
 	DRIVE_TMP_FOLDER = "tmp"
 
-	// Default cache TTL
-	CACHE_TTL_SECONDS = 60
-
 	// Total number of tries when we get a 5xx from Gdrive (includes first attempt)
 	NUM_TRIES = 3
 )
-
-// Object cache
-type objCache struct {
-	obj       interface{}
-	timestamp time.Time
-}
 
 // Main Gdrive struct
 type Gdrive struct {
@@ -67,27 +57,6 @@ type Gdrive struct {
 	// caches (one for Drive.File objects, another for child objects)
 	filecache  *map[string]*objCache
 	childcache *map[string]*objCache
-}
-
-//------------------------------------------------------------------------------
-//	Custom error object and methods
-//------------------------------------------------------------------------------
-
-type GdrivePathError struct {
-	ObjectNotFound bool
-	msg            string
-}
-
-func (e *GdrivePathError) Error() string {
-	return e.msg
-}
-
-func IsObjectNotFound(e error) bool {
-	serr, ok := e.(*GdrivePathError)
-	if ok && serr.ObjectNotFound {
-		return true
-	}
-	return false
 }
 
 // NewGdrivePath creates and returns a new *Gdrive Object.
@@ -116,41 +85,6 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	g.childcache = &map[string]*objCache{}
 
 	return g, err
-}
-
-//------------------------------------------------------------------------------
-//	Private methods
-//------------------------------------------------------------------------------
-
-// cacheAdd: Add/replace object in the cache using 'drivePath' as a key
-// Returns: nothing
-func (g *Gdrive) cacheAdd(cache *map[string]*objCache, drivePath string, obj interface{}) {
-	item := &objCache{obj, time.Now()}
-	m := *cache
-	m[drivePath] = item
-}
-
-// cacheGet: Retrieves object from the cache using 'drivePath' as a key
-// Returns: *interface{} object or nil if not found or expired
-func (g *Gdrive) cacheGet(cache *map[string]*objCache, drivePath string) interface{} {
-	m := *cache
-	item, ok := m[drivePath]
-	if ok {
-		if time.Now().After(item.timestamp.Add(CACHE_TTL_SECONDS * time.Second)) {
-			g.cacheDel(cache, drivePath)
-			return nil
-		} else {
-			return item.obj
-		}
-	}
-
-	return nil
-}
-
-// cacheDel: Removes object from the cache using 'drivePath' as a key.
-// Returns: nothing
-func (g *Gdrive) cacheDel(cache *map[string]*objCache, drivePath string) {
-	delete(*cache, drivePath)
 }
 
 // Authenticates a newly created method (called by NewGdrivePath)
@@ -196,125 +130,6 @@ func (g *Gdrive) authenticate() error {
 
 	g.transport.Token = token
 	return nil
-}
-
-//------------------------------------------------------------------------------
-//	Static functions
-//------------------------------------------------------------------------------
-
-// CreateDate returns the time.Time representation of the *drive.File object's creation date.
-func CreateDate(driveFile *drive.File) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, driveFile.CreatedDate)
-}
-
-// IsDir returns true if the passed *drive.File object is a directory
-func IsDir(driveFile *drive.File) bool {
-	return (driveFile.MimeType == MIMETYPE_FOLDER)
-}
-
-// ModifiedDate returns the time.Time representation of the *drive.File
-// object's modification date, rounded to the nearest second. Comparing dates
-// with nanosecond information leads to rounding errors.
-func ModifiedDate(driveFile *drive.File) (time.Time, error) {
-	tt, err := time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return tt.Truncate(time.Second), nil
-}
-
-// Escape single quotes inside string with a backslash
-func escapeQuotes(str string) string {
-	var ret []string
-	if strings.Index(str, "'") == -1 {
-		return str
-	}
-	tokens := strings.Split(str, "'")
-	for idx := 0; idx < len(tokens); idx++ {
-		ret = append(ret, tokens[idx])
-		if idx != len(tokens)-1 {
-			ret = append(ret, "\\'")
-		}
-	}
-	return strings.Join(ret, "")
-}
-
-// Execute a Gdrive Do() operation returning a *drive.ChildList and error from the
-// original operation. Retry operation (with exponential fallback) if a 5xx
-// is received from the other side.
-func driveChildListOpRetry(fn func() (*drive.ChildList, error)) (*drive.ChildList, error) {
-	var (
-		err            error
-		driveChildList *drive.ChildList
-	)
-	for try := 1; try <= NUM_TRIES; try++ {
-		driveChildList, err = fn()
-		if err != nil {
-			// HTTP error?
-			if derr, ok := err.(*googleapi.Error); ok {
-				// 5xx?
-				if derr.Code >= 500 || derr.Code <= 599 {
-					//time.Sleep(time.Millisecond * (rand.Int31n(2000) + 1000*try))
-					time.Sleep(time.Millisecond * time.Duration(1000*try))
-					continue
-				}
-			}
-			return nil, err
-		}
-		return driveChildList, err
-	}
-	return nil, err
-}
-
-// Execute a Gdrive Do() operation returning a *drive.File and error from the
-// original operation. Retry operation (with exponential fallback) if a 5xx
-// is received from the other side.
-func driveFileOpRetry(fn func() (*drive.File, error)) (*drive.File, error) {
-	var (
-		err       error
-		driveFile *drive.File
-	)
-	for try := 1; try <= NUM_TRIES; try++ {
-		driveFile, err = fn()
-		if err != nil {
-			// HTTP error?
-			if derr, ok := err.(*googleapi.Error); ok {
-				// 5xx?
-				if derr.Code >= 500 || derr.Code <= 599 {
-					//time.Sleep(time.Millisecond * (rand.Int31n(2000) + 1000*try))
-					time.Sleep(time.Millisecond * time.Duration(1000*try))
-					continue
-				}
-			}
-			return nil, err
-		}
-		return driveFile, err
-	}
-	return nil, err
-}
-
-// splitPath takes a Unix like pathname, splits it on its components, and
-// remove empty elements and unnecessary leading and trailing slashes.
-//
-// Returns:
-//   - string: directory
-//   - string: filename
-//   - string: completely reconstructed path.
-func splitPath(pathName string) (string, string, string) {
-	var ret []string
-
-	for _, e := range strings.Split(pathName, "/") {
-		if e != "" {
-			ret = append(ret, e)
-		}
-	}
-	if len(ret) == 0 {
-		return "", "", ""
-	}
-	if len(ret) == 1 {
-		return "", ret[0], ret[0]
-	}
-	return strings.Join(ret[0:len(ret)-1], "/"), ret[len(ret)-1], strings.Join(ret, "/")
 }
 
 //------------------------------------------------------------------------------
@@ -527,50 +342,98 @@ func (g *Gdrive) DownloadToFile(srcPath string, localFile string) (int64, error)
 	return written, nil
 }
 
-// Insert a file named 'dstPath' with the contents coming from reader. This
-// method first inserts the file under DRIVE_TMP_FOLDER and then moves it to
-// its final location. DRIVE_TMP_FOLDER will be automatically created, if
-// needed.
+// Insert a file named 'dstPath' with the contents coming from reader. The
+// method calls the 'insert' method with the inplace option set to false,
+// causing the file to be writen to a temporary location and then renamed to
+// its final place. This method is safer (but slower) than the InsertInPlace
+// method.
 //
 // Returns:
 //   - *drive.File: pointing to the file in its final location.
 //   - error
 func (g *Gdrive) Insert(dstPath string, reader io.Reader) (*drive.File, error) {
-	// We always upload to DRIVE_TMP_FOLDER so it must always exist
-	tmpDirObj, err := g.Mkdir(DRIVE_TMP_FOLDER)
-	if err != nil {
-		return nil, err
+	return g.insert(dstPath, reader, false)
+}
+
+// Insert a file named 'dstPath' with the contents coming from reader. The
+// method calls the 'insert' method with the inplace option set to true,
+// causing the file to be written directly to its final destination. This
+// is faster but less safe than using "Insert".
+//
+// Returns:
+//   - *drive.File: pointing to the file in its final location.
+//   - error
+func (g *Gdrive) InsertInPlace(dstPath string, reader io.Reader) (*drive.File, error) {
+	return g.insert(dstPath, reader, true)
+}
+
+// Insert a file named 'dstPath' with the contents coming from reader. If
+// 'inplace' is set to false, this method first inserts the file under
+// DRIVE_TMP_FOLDER and then moves it to its final location. If inplace is set
+// to true, the the methdo removes the destination file if it exists and
+// uploads directly (this saves time). DRIVE_TMP_FOLDER will be automatically
+// created, if needed.
+//
+// Returns:
+//   - *drive.File: pointing to the file in its final location.
+//   - error
+func (g *Gdrive) insert(dstPath string, reader io.Reader, inplace bool) (*drive.File, error) {
+	var (
+		outDir     string
+		outFile    string
+		outPath    string
+		parent     *drive.File
+		outFileObj *drive.File
+		err        error
+	)
+
+	if inplace {
+		outDir, outFile, dstPath = splitPath(dstPath)
+		outPath = dstPath
+		parent, err = g.Stat(outDir)
+		if err != nil {
+			return nil, fmt.Errorf("insert: Unable to stat destination directory: \"%s\": %v", outDir, err)
+		}
+	} else {
+		// We upload to DRIVE_TMP_FOLDER so it must always exist
+		parent, err = g.Mkdir(DRIVE_TMP_FOLDER)
+		if err != nil {
+			return nil, err
+		}
+
+		outFile = fmt.Sprintf("temp-%d-%d", rand.Int31(), rand.Int31())
+		outPath = DRIVE_TMP_FOLDER + "/" + outFile
 	}
 
-	tmpFile := fmt.Sprintf("temp-%d-%d", rand.Int31(), rand.Int31())
-	tmpPath := DRIVE_TMP_FOLDER + "/" + tmpFile
-
-	// Delete temp file if it already exists (file or directory)
-	tmpFileObj, err := g.Stat(tmpPath)
+	// Delete output object if it already exists (file or directory)
+	outFileObj, err = g.Stat(outPath)
 	if err != nil && !IsObjectNotFound(err) {
 		return nil, err
 	}
 	if !IsObjectNotFound(err) {
-		_, err = g.GdriveFilesTrash(tmpFileObj.Id)
+		_, err = g.GdriveFilesTrash(outFileObj.Id)
 		if err != nil {
-			return nil, fmt.Errorf("Insert: Error removing existing temporary file \"%s\": %v", tmpPath, err)
+			return nil, fmt.Errorf("insert: Error removing (existing) destination file \"%s\": %v", outPath, err)
 		}
 	}
 
-	// Insert file into tmp dir with the temporary name
-	tmpFileObj, err = g.GdriveFilesInsert(reader, tmpFile, tmpDirObj.Id, "")
+	// Insert file
+	outFileObj, err = g.GdriveFilesInsert(reader, outFile, parent.Id, "")
 	if err != nil {
-		return nil, fmt.Errorf("Insert: Error inserting temporary file \"%s\": %v", tmpPath, err)
+		return nil, fmt.Errorf("insert: Error inserting file \"%s\": %v", outPath, err)
 	}
 
-	// Move file to definitive location
-	dstFileObj, err := g.Move(tmpPath, dstPath)
-	if err != nil {
-		return nil, err
+	// Move file to definitive location if needed
+	if !inplace {
+		outFileObj, err = g.Move(outPath, dstPath)
+		if err != nil {
+			return nil, err
+		}
+		outPath = dstPath
 	}
 
-	// No need to add to cache since Move (above) does it for us.
-	return dstFileObj, nil
+	cacheAdd(g.filecache, outPath, outFileObj)
+	return outFileObj, nil
 }
 
 // Insert a file named 'dstPath' with the contents of 'localFile'. This method
@@ -683,7 +546,7 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	g.cacheAdd(g.filecache, drivePath, driveFile)
+	cacheAdd(g.filecache, drivePath, driveFile)
 	return driveFile, nil
 }
 
@@ -727,16 +590,16 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Move: Error removing destination file \"%s\": %v", dstPath, err)
 		}
-		g.cacheDel(g.filecache, dstPath)
+		cacheDel(g.filecache, dstPath)
 	}
 
 	// Set parents and change name if needed
 	driveFile, err := g.GdriveFilesPatch(srcObj.Id, dstFile, "", []string{dstDirObj.Id}, []string{srcParentObj.Id})
-	g.cacheDel(g.filecache, srcPath)
+	cacheDel(g.filecache, srcPath)
 	if err != nil {
 		return nil, fmt.Errorf("Move: Error moving temporary file \"%s\" to \"%s\": %v", srcPath, dstPath, err)
 	}
-	g.cacheAdd(g.filecache, dstPath, driveFile)
+	cacheAdd(g.filecache, dstPath, driveFile)
 	return driveFile, nil
 }
 
@@ -770,7 +633,7 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	if err != nil {
 		return nil, err
 	}
-	g.cacheAdd(g.filecache, drivePath, driveFile)
+	cacheAdd(g.filecache, drivePath, driveFile)
 	return driveFile, nil
 }
 
@@ -801,7 +664,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	)
 
 	// Cached?
-	driveFile := g.cacheGet(g.filecache, drivePath)
+	driveFile := cacheGet(g.filecache, drivePath)
 	if driveFile != nil {
 		return driveFile.(*drive.File), nil
 	}
@@ -835,7 +698,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 
 			// If partial path cached, we set the parent to the id
 			// of the cached object and keep traversing down the path.
-			child := g.cacheGet(g.childcache, ppath)
+			child := cacheGet(g.childcache, ppath)
 			if child != nil {
 				parent = child.(*drive.ChildReference).Id
 			} else {
@@ -866,7 +729,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 					return nil, fmt.Errorf("Stat: More than one directory named \"%s\" exists in path \"%s\"", elem, drivePath)
 				}
 				parent = children[0].Id
-				g.cacheAdd(g.childcache, ppath, children[0])
+				cacheAdd(g.childcache, ppath, children[0])
 			}
 		}
 	}
@@ -897,7 +760,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 
 	ret, err := g.GdriveFilesGet(parent)
 	if err == nil {
-		g.cacheAdd(g.filecache, drivePath, ret)
+		cacheAdd(g.filecache, drivePath, ret)
 	}
 	return ret, err
 }
