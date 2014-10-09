@@ -463,11 +463,11 @@ func (g *Gdrive) InsertFile(dstPath string, localFile string) (*drive.File, erro
 	// Set modified date to localFile's mtime
 	fi, err := os.Stat(localFile)
 	if err != nil {
-		return nil, fmt.Errorf("Insert: Unable to stat localFile \"%s\": %v", localFile, err)
+		return nil, fmt.Errorf("InsertFile: Unable to stat localFile \"%s\": %v", localFile, err)
 	}
 	dstFileObj, err := g.SetModifiedDate(dstPath, fi.ModTime())
 	if err != nil {
-		return nil, fmt.Errorf("Insert: Unable to set date of \"%s\": %v", dstPath, err)
+		return nil, fmt.Errorf("InsertFile: Unable to set date of \"%s\": %v", dstPath, err)
 	}
 
 	// No need to add to cache since Move (above) does it for us.
