@@ -51,9 +51,6 @@ type Gdrive struct {
 
 	log *logger.Logger
 
-	// Unique Id for this instance
-	gdrive_uid int
-
 	// caches (one for Drive.File objects, another for child objects)
 	filecache  *map[string]*objCache
 	childcache *map[string]*objCache
@@ -78,7 +75,6 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 
 	// Unique Id for this instance
 	rand.Seed(time.Now().UnixNano())
-	g.gdrive_uid = rand.Int()
 
 	// Initialize blank caches
 	g.filecache = &map[string]*objCache{}
