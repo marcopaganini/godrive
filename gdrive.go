@@ -18,10 +18,8 @@ package gdrive_path
 import (
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/marcopaganini/logger"
 
@@ -75,9 +73,6 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 
 	// Logger method
 	g.log = logger.New("")
-
-	// Unique Id for this instance
-	rand.Seed(time.Now().UnixNano())
 
 	// Initialize blank caches
 	g.filecache = &map[string]*objCache{}
