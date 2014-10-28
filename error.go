@@ -6,6 +6,7 @@ package gdrive_path
 //
 // (C) Sep/2014 by Marco Paganini <paganini@paganini.net>
 
+// Custom Error for GdrivePath.
 type GdrivePathError struct {
 	ObjectNotFound bool
 	msg            string
@@ -15,6 +16,8 @@ func (e *GdrivePathError) Error() string {
 	return e.msg
 }
 
+// Returns true if the passed error is of type GdrivePathError and
+// the error condition was caused by an Object Not Found.
 func IsObjectNotFound(e error) bool {
 	serr, ok := e.(*GdrivePathError)
 	if ok && serr.ObjectNotFound {

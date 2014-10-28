@@ -16,16 +16,15 @@ type objCache struct {
 	timestamp time.Time
 }
 
-// cacheAdd: Add/replace object in the cache using 'drivePath' as a key
-// Returns: nothing
+// Add/replace object in the cache using 'drivePath' as a key.
 func cacheAdd(cache *map[string]*objCache, drivePath string, obj interface{}) {
 	item := &objCache{obj, time.Now()}
 	m := *cache
 	m[drivePath] = item
 }
 
-// cacheGet: Retrieves object from the cache using 'drivePath' as a key
-// Returns: *interface{} object or nil if not found or expired
+// Retrieve object from the cache using 'drivePath' as a key.
+// Returns an *interface{} object or nil if not found or expired.
 func cacheGet(cache *map[string]*objCache, drivePath string) interface{} {
 	m := *cache
 	item, ok := m[drivePath]
@@ -41,8 +40,7 @@ func cacheGet(cache *map[string]*objCache, drivePath string) interface{} {
 	return nil
 }
 
-// cacheDel: Removes object from the cache using 'drivePath' as a key.
-// Returns: nothing
+// Remove object from the cache using 'drivePath' as a key.
 func cacheDel(cache *map[string]*objCache, drivePath string) {
 	delete(*cache, drivePath)
 }

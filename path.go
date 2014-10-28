@@ -25,11 +25,8 @@ import (
 	"code.google.com/p/google-api-go-client/drive/v2"
 )
 
-// Return an io.Reader to the file pointed by srcPath.
-//
-// Returns:
-//	 - io.Reader
-//   - error
+// Download a file from Gdrive. Returns an io.Reader to gdrive file pointed by srcPath.
+// The io.Reader can be used to save the file locally by the caller.
 func (g *Gdrive) Download(srcPath string) (io.Reader, error) {
 	// Sanitize
 	_, _, srcPath = splitPath(srcPath)
@@ -54,13 +51,10 @@ func (g *Gdrive) Download(srcPath string) (io.Reader, error) {
 	return resp.Body, err
 }
 
-// Downloads a file named 'srcPath' into 'localFile'. localFile will be
+// Download a file named 'srcPath' into 'localFile'. localFile will be
 // overwritten if it exists. The file is first downloaded into a temporary file
-// and then atomically moved into the destination file.
-//
-// Returns:
-//	 - int64 - number of bytes downloaded
-//   - error
+// and then atomically moved into the destination file. Returns the number of bytes
+// downloaded.
 func (g *Gdrive) DownloadToFile(srcPath string, localFile string) (int64, error) {
 	// Sanitize
 	_, _, srcPath = splitPath(srcPath)
@@ -113,15 +107,13 @@ func (g *Gdrive) DownloadToFile(srcPath string, localFile string) (int64, error)
 	return written, nil
 }
 
-// Insert a file named 'dstPath' with the contents coming from reader. The
+// Insert a file named 'dstPath' with the contents coming from 'reader'. The
 // method calls the 'insert' method with the inplace option set to false,
 // causing the file to be writen to a temporary location and then renamed to
 // its final place. This method is safer (but slower) than the InsertInPlace
 // method.
 //
-// Returns:
-//   - *drive.File: pointing to the file in its final location.
-//   - error
+// Returns *drive.File pointing to the file in its final location.
 func (g *Gdrive) Insert(dstPath string, reader io.Reader) (*drive.File, error) {
 	return g.insert(dstPath, reader, false)
 }
@@ -129,11 +121,9 @@ func (g *Gdrive) Insert(dstPath string, reader io.Reader) (*drive.File, error) {
 // Insert a file named 'dstPath' with the contents coming from reader. The
 // method calls the 'insert' method with the inplace option set to true,
 // causing the file to be written directly to its final destination. This
-// is faster but less safe than using "Insert".
+// is faster but (theoretically) less safe than using "Insert".
 //
-// Returns:
-//   - *drive.File: pointing to the file in its final location.
-//   - error
+// Returns *drive.File: pointing to the file in its final location.
 func (g *Gdrive) InsertInPlace(dstPath string, reader io.Reader) (*drive.File, error) {
 	return g.insert(dstPath, reader, true)
 }
@@ -145,9 +135,7 @@ func (g *Gdrive) InsertInPlace(dstPath string, reader io.Reader) (*drive.File, e
 // uploads directly (this saves time). DRIVE_TMP_FOLDER will be automatically
 // created, if needed.
 //
-// Returns:
-//   - *drive.File: pointing to the file in its final location.
-//   - error
+// Returns *drive.File: pointing to the file in its final location.
 func (g *Gdrive) insert(dstPath string, reader io.Reader, inplace bool) (*drive.File, error) {
 	var (
 		outDir     string
@@ -207,50 +195,9 @@ func (g *Gdrive) insert(dstPath string, reader io.Reader, inplace bool) (*drive.
 	return outFileObj, nil
 }
 
-// Insert a file named 'dstPath' with the contents of 'localFile'. This method
-// first inserts the file under DRIVE_TMP_FOLDER and then moves it to its
-// final location. DRIVE_TMP_FOLDER will be automatically created, if needed.
-// The inserted object's modifiedDate will be set to the mtime of localFile.
-//
-// Returns:
-//   - *drive.File: pointing to the file in its final location.
-//   - error
-func (g *Gdrive) InsertFile(dstPath string, localFile string) (*drive.File, error) {
-	// Sanitize
-	_, _, dstPath = splitPath(dstPath)
-	if dstPath == "" {
-		return nil, fmt.Errorf("InsertFile: empty destination path")
-	}
-
-	reader, err := os.Open(localFile)
-	if err != nil {
-		return nil, fmt.Errorf("InsertFile: Error opening \"%s\": %v", localFile, err)
-	}
-	_, err = g.Insert(dstPath, reader)
-	if err != nil {
-		return nil, err
-	}
-
-	// Set modified date to localFile's mtime
-	fi, err := os.Stat(localFile)
-	if err != nil {
-		return nil, fmt.Errorf("InsertFile: Unable to stat localFile \"%s\": %v", localFile, err)
-	}
-	dstFileObj, err := g.SetModifiedDate(dstPath, fi.ModTime())
-	if err != nil {
-		return nil, fmt.Errorf("InsertFile: Unable to set date of \"%s\": %v", dstPath, err)
-	}
-
-	// No need to add to cache since Move (above) does it for us.
-	return dstFileObj, nil
-}
-
-// ListDir returns a slice of *drive.File objects under 'drivePath'
-// which match 'query'. If query is blank, it defaults to 'trashed = false'.
-//
-// Returns:
-//   - []*drive.File of all objects inside drivePath matching query
-//   - error
+// Returns a slice of *drive.File objects under 'drivePath' matching 'query'
+// (in Google Drive query format.) If query is blank, it defaults to 'trashed =
+// false'.
 func (g *Gdrive) ListDir(drivePath string, query string) ([]*drive.File, error) {
 	var ret []*drive.File
 
@@ -278,12 +225,10 @@ func (g *Gdrive) ListDir(drivePath string, query string) ([]*drive.File, error) 
 	return ret, nil
 }
 
-// Mkdir creates the directory (folder) specified by drivePath.
-//
-// Returns:
-//   - *drive.File containing the object just created, or, *drive.File of
-//     an existing object.
-//   - err
+// Creates the directory (folder) specified by drivePath. Returns the
+// *drive.File pointing to the object. If the folder already exists, the
+// *drive.File of the existing folder will be returned (this saves one Stat
+// when creating directories.)
 func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	var parentId string
 
@@ -321,13 +266,10 @@ func (g *Gdrive) Mkdir(drivePath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Rename/Move the object in 'srcPath' (file or directory) to 'dstPath'.  It
-// does that by removing the directory in srcPath from the list of parents of
-// the object, and adding dstPath.
-//
-// Returns:
-//   - *drive.File containing the destination object
-//   - error
+// Rename/Move the object in 'srcPath' (file or directory) to 'dstPath' by
+// calling patch to replace dstPath as the parent of 'srcPath'.  The paths are
+// full paths (dir/dir/dir.../file).  Returns the *drive.File containing the
+// destination object.
 func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	// Sanitize Source & Destination
 	srcDir, _, srcPath := splitPath(srcPath)
@@ -374,22 +316,18 @@ func (g *Gdrive) Move(srcPath string, dstPath string) (*drive.File, error) {
 	return driveFile, nil
 }
 
-// Set the debug level for future uses of the log.Debug{ln,f} methods
+// Set the debug level for future uses of the log.Debug{ln,f} methods.
 func (g *Gdrive) SetDebugLevel(n int) {
 	g.log.SetDebugLevel(n)
 }
 
-// Set the verbose level for future uses of the log.Verbose{ln,f} methods
+// Set the verbose level for future uses of the log.Verbose{ln,f} methods.
 func (g *Gdrive) SetVerboseLevel(n int) {
 	g.log.SetVerboseLevel(n)
 }
 
-// SetModifiedDate sets the modification date of the file/directory specified by
-// 'drivePath' to 'modifiedDate'.
-//
-// Returns:
-//   - *drive.File pointing to the modified file/dir
-//   - error
+// Set the modification date of the file/directory specified by 'drivePath' to
+// 'modifiedDate'. Returns *drive.File pointing to the modified file/dir.
 func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*drive.File, error) {
 
 	driveFile, err := g.Stat(drivePath)
@@ -413,19 +351,18 @@ func (g *Gdrive) SetModifiedDate(drivePath string, modifiedDate time.Time) (*dri
 	return driveFile, nil
 }
 
-// Stat receives a path like filename and parses each element in turn, returning
-// the *drive.File object for the last element in the path.
+// Returns the *drive.File object for the last element in 'drivePath'.  The
+// path must be specified as a full path (similar to unix filesystem path.)
 //
 // Google Drive allows more than one object with the same name and Unix
 // filesystems do not. Stat returns an error if a duplicate is found anywhere
-// in the requested path (which will require human intervention.) Stat returns
-// an instance of GdrivePathError with ObjectNotFound set if the requested
-// object cannot be found. Use g.IsObjecNotFound(err) to test for this
-// condition.
+// in the requested path (which will require human intervention, and should
+// never happen if only this set of routines is used to create files under that
+// path.) Stat returns an instance of GdrivePathError with ObjectNotFound set
+// if the requested object cannot be found. Use g.IsObjecNotFound(err) to test
+// for this condition.
 //
-// Returns:
-//   - *drive.File object
-//   - error
+// Returns *drive.File object of the object pointed by the full path.
 func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	var (
 		children []*drive.ChildReference

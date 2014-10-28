@@ -14,19 +14,19 @@ import (
 	"code.google.com/p/google-api-go-client/googleapi"
 )
 
-// CreateDate returns the time.Time representation of the *drive.File object's creation date.
+// Return the time.Time representation of the *drive.File object's creation date.
 func CreateDate(driveFile *drive.File) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, driveFile.CreatedDate)
 }
 
-// IsDir returns true if the passed *drive.File object is a directory
+// Return true if the passed *drive.File object is a directory.
 func IsDir(driveFile *drive.File) bool {
 	return (driveFile.MimeType == MIMETYPE_FOLDER)
 }
 
-// ModifiedDate returns the time.Time representation of the *drive.File
-// object's modification date, rounded to the nearest second. Comparing dates
-// with nanosecond information leads to rounding errors.
+// Return the time.Time representation of the *drive.File object's modification
+// date. Dates are rounded to the nearest second (to avoid nanosecond rounding
+// errors when comparing dates.)
 func ModifiedDate(driveFile *drive.File) (time.Time, error) {
 	tt, err := time.Parse(time.RFC3339Nano, driveFile.ModifiedDate)
 	if err != nil {
@@ -35,7 +35,8 @@ func ModifiedDate(driveFile *drive.File) (time.Time, error) {
 	return tt.Truncate(time.Second), nil
 }
 
-// Escape single quotes inside string with a backslash
+// Escape single quotes inside string with a backslash. Returns the string
+// with quotes escaped.
 func escapeQuotes(str string) string {
 	var ret []string
 	if strings.Index(str, "'") == -1 {
@@ -108,10 +109,8 @@ func driveFileOpRetry(fn func() (*drive.File, error)) (*drive.File, error) {
 // splitPath takes a Unix like pathname, splits it on its components, and
 // remove empty elements and unnecessary leading and trailing slashes.
 //
-// Returns:
-//   - string: directory
-//   - string: filename
-//   - string: completely reconstructed path.
+// Returns three strings: directory, filename, and a completely reconstructed
+// path.
 func splitPath(pathName string) (string, string, string) {
 	var ret []string
 
