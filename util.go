@@ -123,8 +123,11 @@ func splitPath(pathName string) (string, string, string) {
 	if len(ret) == 0 {
 		return "", "", ""
 	}
+	// filename.foo or /filename.foo. Filenames without path
+	// are always assumed to start at root. Gdrive has no concept
+	// of current working directory.
 	if len(ret) == 1 {
-		return "", ret[0], ret[0]
+		return "/", ret[0], "/" + ret[0]
 	}
 	return strings.Join(ret[0:len(ret)-1], "/"), ret[len(ret)-1], strings.Join(ret, "/")
 }

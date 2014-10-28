@@ -294,7 +294,7 @@ func (g *Gdrive) Stat(drivePath string) (*drive.File, error) {
 	//
 	// Note: this is expensive for what it is :(
 
-	if dirs != "" {
+	if dirs != "/" {
 		subdirs = strings.Split(dirs, "/")
 
 		for idx := 0; idx < len(subdirs); idx++ {
