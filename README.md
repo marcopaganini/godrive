@@ -1,19 +1,9 @@
 # Gdrive_path
 
 Gdrive_path (GDP) is a Go library that allows easy access to files and
-directories (aka "folders") in a Google Drive. It attempts to abstract Google
-Drive concepts by presenting a "path" like interface. In other words, it allows
-users to access their files in Google Drive using regular paths, similar to a
-regular Unix filesystem.
-
-There's usually no need to worry about "Parent IDs" and "Object IDs". Objects
-(files or directories) are referred to using a familiar unix path notation. A file
-named "tmp/example" represents a file "example" inside the directory "tmp" (all paths
-starts at root, so there's no need for leading slash.) The library takes care of
-all details regarding the Google Drive internals.
-
-Besides the "high level" functions, most "glue" functions to the lower level
-Gdrive primitives are also exported, so they can be used as well.
+directories (aka "folders") on Google Drive. The library abstracts Google
+Drive concepts by presenting a "path" like interface, allowing users to access their
+files in Google Drive using Unix-like pathnames.
 
 ## Installation
 
@@ -37,11 +27,12 @@ Compile with go build as usual.
 
 ## Google Drive instructions
 
-To use Google Drive, you first need to have a Client Id, a Client Secret and a
-one-time code. To create the Client Id and Secret, visit the [Google Developers Console][https://console.developers.google.com/project] and create a new project.
-Make sure your project has the Gdrive API turned on (APIs & Auth/APIs menu on the left).
+To use Google Drive with this library, you need a Client Id, a Client Secret and a
+one-time code. To create the Client Id and Secret, visit the [Google Developers Console](https://console.developers.google.com/project) and create a new project.
+Make sure the project has the Google Drive API turned on (APIs & Auth/APIs menu on the left).
 Use the APIs & Auth/Credentials menu to create a new Client ID for OAuth authentication.
-For more information on the entire process, consult the [Google Drive Web APIs][https://developers.google.com/drive/web/enable-sdk] page.
+
+For more information on the entire process, consult the [Google Drive Web APIs](https://developers.google.com/drive/web/enable-sdk) page.
 
 ## Example
 
@@ -146,8 +137,8 @@ func main() {
 
 ## Notes
 
-This library can be considered BETA but I'm actively working on it. Keep the following in mind
-when using this library:
+This library should be considered in BETA state. I'm actively working on it. Please keep the following in mind
+when using this it:
 
 * Google Drive allows multiple files/directories with the same name. Since
   we're (kinda) emulating the semantics of a Unix filesystem, the library will
