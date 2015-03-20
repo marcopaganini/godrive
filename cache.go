@@ -1,13 +1,13 @@
-package gdrive_path
+package godrive
 
-// This file is part of the gdrive_path Go library
+// This file is part of the godrive Go library
 //
-// (C) Sep/2014 by Marco Paganini <paganini@paganini.net>
+// (C) 2015 by Marco Paganini <paganini@paganini.net>
 
 import "time"
 
 const (
-	CACHE_TTL_SECONDS = 60
+	cacheTTLSeconds = 60
 )
 
 // Object cache
@@ -29,12 +29,11 @@ func cacheGet(cache *map[string]*objCache, drivePath string) interface{} {
 	m := *cache
 	item, ok := m[drivePath]
 	if ok {
-		if time.Now().After(item.timestamp.Add(CACHE_TTL_SECONDS * time.Second)) {
+		if time.Now().After(item.timestamp.Add(cacheTTLSeconds * time.Second)) {
 			cacheDel(cache, drivePath)
 			return nil
-		} else {
-			return item.obj
 		}
+		return item.obj
 	}
 
 	return nil

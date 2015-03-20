@@ -1,19 +1,14 @@
-package gdrive_path
+package godrive
 
 // This library requires the Google Drive SDK to run.
 //
 // For details, check the README.md file with this distribution.
 //
 // This file contains the core of the methods interfacing with Gdrive itself
-// and lower level methods. Most users will only use the "NewGdrivePath" method
+// and lower level methods. Most users will only use the "NewGoDrive" method
 // from this file and use the higher level routines in path.go
 //
-// This library is under constant and rapid development but should be
-// considered ALPHA quality for the time being. The author will not be help
-// responsible if it eats all of your files, kicks your cat and runs away with
-// you wife/husband.
-//
-// (C) Aug/2014 by Marco Paganini <paganini@paganini.net>
+// (C) 2015 by Marco Paganini <paganini@paganini.net>
 
 import (
 	"fmt"
@@ -29,18 +24,18 @@ import (
 
 const (
 	// Mime-Type used by Google Drive to indicate a folder
-	MIMETYPE_FOLDER = "application/vnd.google-apps.folder"
+	mimeTypeFolder = "application/vnd.google-apps.folder"
 
 	// Directory in Google Drive to hold temporary copies of files during inserts
-	DRIVE_TMP_FOLDER = "tmp"
+	driveTmpFolder = "tmp"
 
 	// Total number of tries when we get a 5xx from Gdrive (includes first attempt)
-	NUM_TRIES = 3
+	numTries = 3
 )
 
-// Main Gdrive struct
+// Gdrive is the main structure representing a GoDrive object
 type Gdrive struct {
-	clientId     string
+	clientID     string
 	clientSecret string
 	code         string
 	scope        string
@@ -57,13 +52,13 @@ type Gdrive struct {
 	childcache *map[string]*objCache
 }
 
-// NewGdrivePath creates and returns a new *Gdrive Object or (nil, error) in case of problems.
-func NewGdrivePath(clientId string, clientSecret string, code string, scope string, cacheFile string) (*Gdrive, error) {
-	if clientId == "" || clientSecret == "" {
-		return nil, fmt.Errorf("NewGdrivePath: Need both clientId and clientSecret")
+// NewGoDrive creates and returns a new *Gdrive Object or (nil, error) in case of problems.
+func NewGoDrive(clientID string, clientSecret string, code string, scope string, cacheFile string) (*Gdrive, error) {
+	if clientID == "" || clientSecret == "" {
+		return nil, fmt.Errorf("NewGoDrive: Need both clientId and clientSecret")
 	}
 
-	g := &Gdrive{clientId: clientId, clientSecret: clientSecret, code: code, scope: scope, cacheFile: cacheFile}
+	g := &Gdrive{clientID: clientID, clientSecret: clientSecret, code: code, scope: scope, cacheFile: cacheFile}
 	err := g.authenticate()
 	if err != nil {
 		return nil, err
@@ -81,9 +76,7 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 	return g, err
 }
 
-// Authenticates a newly created method (called by NewGdrivePath).
-//
-// This method authenticates the newly created object using clientId,
+// authenticate authenticates the newly created object using clientId,
 // clientSecret and code.  cacheFile is used to store code and only needs to be
 // specified once.
 //
@@ -93,7 +86,7 @@ func NewGdrivePath(clientId string, clientSecret string, code string, scope stri
 func (g *Gdrive) authenticate() error {
 	// Set up configuration
 	config := &oauth.Config{
-		ClientId:     g.clientId,
+		ClientId:     g.clientID,
 		ClientSecret: g.clientSecret,
 		Scope:        g.scope,
 		RedirectURL:  "oob",
@@ -131,30 +124,30 @@ func (g *Gdrive) authenticate() error {
 //	Gdrive Primitives: Direct interfaces with Gdrive
 //------------------------------------------------------------------------------
 
-// Return a *drive.File object for the object identified by 'fileId'
-func (g *Gdrive) GdriveFilesGet(fileId string) (*drive.File, error) {
-	f, err := driveFileOpRetry(g.service.Files.Get(fileId).Do)
+// GdriveFilesGet returns a *drive.File object for the object identified by 'fileId'
+func (g *Gdrive) GdriveFilesGet(fileID string) (*drive.File, error) {
+	f, err := driveFileOpRetry(g.service.Files.Get(fileID).Do)
 	if err != nil {
-		return nil, fmt.Errorf("GdriveFilesGet: Error retrieving File Metadata for fileId \"%s\": %v", fileId, err)
+		return nil, fmt.Errorf("GdriveFilesGet: Error retrieving File Metadata for fileId \"%s\": %v", fileID, err)
 	}
 	return f, nil
 }
 
-// Return a slice of *drive.ChilReference containing all
+// GdriveChildrenList returns a slice of *drive.ChilReference containing all
 // objects under 'ParentId' which satisfy the 'query' parameter.
-func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.ChildReference, error) {
+func (g *Gdrive) GdriveChildrenList(parentID string, query string) ([]*drive.ChildReference, error) {
 	var ret []*drive.ChildReference
 
 	pageToken := ""
 	for {
-		c := g.service.Children.List(parentId)
+		c := g.service.Children.List(parentID)
 		c.Q(query)
 		if pageToken != "" {
 			c = c.PageToken(pageToken)
 		}
 		r, err := driveChildListOpRetry(c.Do)
 		if err != nil {
-			return nil, fmt.Errorf("GdriveChildrenList: fetching Id for parent_id \"%s\", query=\"%s\": %v", parentId, query, err)
+			return nil, fmt.Errorf("GdriveChildrenList: fetching Id for parent_id \"%s\", query=\"%s\": %v", parentID, query, err)
 		}
 		ret = append(ret, r.Items...)
 		pageToken = r.NextPageToken
@@ -165,14 +158,15 @@ func (g *Gdrive) GdriveChildrenList(parentId string, query string) ([]*drive.Chi
 	return ret, nil
 }
 
-// Insert a new Object (file/dir) on Google Drive under 'parentId'. The
-// object's contents will come from 'reader' (io.Reader). If reader is nil, an
-// empty object will be created (this is how we create directories). The title
-// of the object will be set to 'title' and the object's MIME Type will be set
-// to 'mimeType', or automatically detected if mimeType is blank.
+// GdriveFilesInsert inserts a new Object (file/dir) on Google Drive under
+// 'parentId'. The object's contents will come from 'reader' (io.Reader). If
+// reader is nil, an empty object will be created (this is how we create
+// directories). The title of the object will be set to 'title' and the
+// object's MIME Type will be set to 'mimeType', or automatically detected if
+// mimeType is blank.
 //
 // Returns a *drive.File object pointing to the file just inserted.
-func (g *Gdrive) GdriveFilesInsert(reader io.Reader, title string, parentId string, mimeType string) (*drive.File, error) {
+func (g *Gdrive) GdriveFilesInsert(reader io.Reader, title string, parentID string, mimeType string) (*drive.File, error) {
 	var (
 		err       error
 		driveFile *drive.File
@@ -184,8 +178,8 @@ func (g *Gdrive) GdriveFilesInsert(reader io.Reader, title string, parentId stri
 		driveFile.MimeType = mimeType
 	}
 	// Set parentId
-	if parentId != "" {
-		p := &drive.ParentReference{Id: parentId}
+	if parentID != "" {
+		p := &drive.ParentReference{Id: parentID}
 		driveFile.Parents = []*drive.ParentReference{p}
 	}
 	if reader != nil {
@@ -199,13 +193,13 @@ func (g *Gdrive) GdriveFilesInsert(reader io.Reader, title string, parentId stri
 	return ret, nil
 }
 
-// Patches a Gdrive object metadata. Currently it can change the Title,
+// GdriveFilesPatch patches a Gdrive object metadata. Currently it can change the Title,
 // modifiedDate, and the list of parent Ids.  Setting values to a blank string
 // (when of type string) or an empty slice (type slice) will cause that
 // particular attribute to remain untouched.
 //
 // Returns a *drive.File object pointing to the modified file.
-func (g *Gdrive) GdriveFilesPatch(fileId string, title string, modifiedDate string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
+func (g *Gdrive) GdriveFilesPatch(fileID string, title string, modifiedDate string, addParentIds []string, removeParentIds []string) (*drive.File, error) {
 	driveFile := &drive.File{}
 	if title != "" {
 		driveFile.Title = title
@@ -213,7 +207,7 @@ func (g *Gdrive) GdriveFilesPatch(fileId string, title string, modifiedDate stri
 	if modifiedDate != "" {
 		driveFile.ModifiedDate = modifiedDate
 	}
-	p := g.service.Files.Patch(fileId, driveFile)
+	p := g.service.Files.Patch(fileID, driveFile)
 	if len(addParentIds) > 0 {
 		p.AddParents(strings.Join(addParentIds, ","))
 	}
@@ -230,8 +224,8 @@ func (g *Gdrive) GdriveFilesPatch(fileId string, title string, modifiedDate stri
 	return r, nil
 }
 
-// Moves the object indicated by 'fileId' to the Google Drive Trash.
-// Returns a *drive.File object pointing to the file inside Trash.
-func (g *Gdrive) GdriveFilesTrash(fileId string) (*drive.File, error) {
-	return driveFileOpRetry(g.service.Files.Trash(fileId).Do)
+// GdriveFilesTrash moves the object indicated by 'fileID' to the Google Drive
+// Trash.  Returns a *drive.File object pointing to the file inside Trash.
+func (g *Gdrive) GdriveFilesTrash(fileID string) (*drive.File, error) {
+	return driveFileOpRetry(g.service.Files.Trash(fileID).Do)
 }

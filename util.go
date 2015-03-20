@@ -1,10 +1,10 @@
-package gdrive_path
+package godrive
 
-// Utility functions for gdrive_path
+// Utility functions for godrive
 //
-// This file is part of the gdrive_path library
+// This file is part of the godrive library
 //
-// (C) Sep/2014 by Marco Paganini <paganini@paganini.net>
+// (C) 2015 by Marco Paganini <paganini@paganini.net>
 
 import (
 	"strings"
@@ -14,17 +14,17 @@ import (
 	"code.google.com/p/google-api-go-client/googleapi"
 )
 
-// Return the time.Time representation of the *drive.File object's creation date.
+// CreateDate returns the time.Time representation of the *drive.File object's creation date.
 func CreateDate(driveFile *drive.File) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, driveFile.CreatedDate)
 }
 
-// Return true if the passed *drive.File object is a directory.
+// IsDir returns true if the passed *drive.File object is a directory.
 func IsDir(driveFile *drive.File) bool {
-	return (driveFile.MimeType == MIMETYPE_FOLDER)
+	return (driveFile.MimeType == mimeTypeFolder)
 }
 
-// Return the time.Time representation of the *drive.File object's modification
+// ModifiedDate returns the time.Time representation of the *drive.File object's modification
 // date. Dates are rounded to the nearest second (to avoid nanosecond rounding
 // errors when comparing dates.)
 func ModifiedDate(driveFile *drive.File) (time.Time, error) {
@@ -35,7 +35,7 @@ func ModifiedDate(driveFile *drive.File) (time.Time, error) {
 	return tt.Truncate(time.Second), nil
 }
 
-// Escape single quotes inside string with a backslash. Returns the string
+// escapeQuotes escapes single quotes inside string with a backslash. Returns the string
 // with quotes escaped.
 func escapeQuotes(str string) string {
 	var ret []string
@@ -60,7 +60,7 @@ func driveChildListOpRetry(fn func() (*drive.ChildList, error)) (*drive.ChildLis
 		err            error
 		driveChildList *drive.ChildList
 	)
-	for try := 1; try <= NUM_TRIES; try++ {
+	for try := 1; try <= numTries; try++ {
 		driveChildList, err = fn()
 		if err != nil {
 			// HTTP error?
@@ -87,7 +87,7 @@ func driveFileOpRetry(fn func() (*drive.File, error)) (*drive.File, error) {
 		err       error
 		driveFile *drive.File
 	)
-	for try := 1; try <= NUM_TRIES; try++ {
+	for try := 1; try <= numTries; try++ {
 		driveFile, err = fn()
 		if err != nil {
 			// HTTP error?

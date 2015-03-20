@@ -1,25 +1,25 @@
-package gdrive_path
+package godrive
 
-// Custom error functions for gdrive_path
+// Custom error functions for godrive
 //
-// This file is part of the gdrive_path library
+// This file is part of the godrive library
 //
-// (C) Sep/2014 by Marco Paganini <paganini@paganini.net>
+// (C) 2015 by Marco Paganini <paganini@paganini.net>
 
-// Custom Error for GdrivePath.
-type GdrivePathError struct {
+// Error defines a custom error for godrive
+type Error struct {
 	ObjectNotFound bool
 	msg            string
 }
 
-func (e *GdrivePathError) Error() string {
+func (e *Error) Error() string {
 	return e.msg
 }
 
-// Returns true if the passed error is of type GdrivePathError and
-// the error condition was caused by an Object Not Found.
+// IsObjectNotFound Returns true if the passed error is of type godrive.Error
+// and the error condition was caused by an Object Not Found.
 func IsObjectNotFound(e error) bool {
-	serr, ok := e.(*GdrivePathError)
+	serr, ok := e.(*Error)
 	if ok && serr.ObjectNotFound {
 		return true
 	}

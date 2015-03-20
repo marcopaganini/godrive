@@ -1,13 +1,13 @@
-# Gdrive_path
+# godrive
 
-Gdrive_path (GDP) is a Go library that allows easy access to files and
-directories (aka "folders") on Google Drive. The library abstracts Google
-Drive concepts by presenting a "path" like interface, allowing users to access their
-files in Google Drive using Unix-like pathnames.
+godrive is a Go library that allows easy access to files and directories (aka
+"folders") on Google Drive. Unlike most "bare bones" libraries, godrive
+abstracts Google Drive concepts by presenting a "path" like interface, allowing
+users to access their files in Google Drive using Unix-like pathnames.
 
 ## Installation
 
-To compile this program and use the gdrive_path libraries, you need a few things:
+To compile this program and use the godrive libraries, you need a few things:
 
 Create a working directory for this project:
 
@@ -55,7 +55,7 @@ import (
         "time"
 
         drive "code.google.com/p/google-api-go-client/drive/v2"
-        gdp "github.com/marcopaganini/gdrive_path"
+        "github.com/marcopaganini/godrive"
 )
 
 const (
@@ -81,9 +81,9 @@ func main() {
         }
         cachefile := path.Join(usr.HomeDir, authCacheFile)
 
-        g, err := gdp.NewGdrivePath(*clientId, *clientSecret, *code, drive.DriveScope, cachefile)
+        g, err := godrive.NewGoDrive(*clientId, *clientSecret, *code, drive.DriveScope, cachefile)
         if err != nil {
-                log.Fatalf("Unable to initialize GdrivePath: %v", err)
+                log.Fatalf("Unable to initialize godrive: %v", err)
         }
 
         // Create a few directories for no good reason other than
@@ -120,11 +120,11 @@ func main() {
 
         for _, fileObj := range dirlist {
                 filetype := "[file] "
-                if gdp.IsDir(fileObj) {
+                if godrive.IsDir(fileObj) {
                         filetype = "[dir]  "
                 }
-                create, _ := gdp.CreateDate(fileObj)
-                modify, _ := gdp.CreateDate(fileObj)
+                create, _ := godrive.CreateDate(fileObj)
+                modify, _ := godrive.CreateDate(fileObj)
 
                 fmt.Printf("%s %s %s [%s]\n",
                         filetype,
